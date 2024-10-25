@@ -1,0 +1,17 @@
+[package]
+name = "gelato"
+version = "0.1.0"
+edition = { workspace = true }
+rust-version = { workspace = true }
+homepage = { workspace = true }
+repository = { workspace = true }
+authors = { workspace = true }
+
+[dependencies]
+ast = { workspace = true }
+lex = { workspace = true }
+parse = { workspace = true }
+
+anyhow = { workspace = true }
+clap = { version = "4.5.20", features = ["derive"] }
+

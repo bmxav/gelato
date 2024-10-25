@@ -1,0 +1,7 @@
+# `import` is used to import Go packages.
+import "fmt"
+
+let name = "Go"
+
+# Doesn't work yet, function calls not implemented.
+#fmt.Println("Hello, %s", Go)

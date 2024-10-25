@@ -1,0 +1,11 @@
+# `let` introduces a new variable into the scope. Variables declared by `let` are immutable.
+let x = 1 + 2 * 3 - 4
+
+# The following will result in an error:
+# x = 10
+
+# `var` on the other hand introduces a mutable variable.
+var y = x
+y += 20
+
+let s = "This is a string"
