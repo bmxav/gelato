@@ -1,4 +1,5 @@
 use parser::{Lexer, Parser, SourceFile, TokenKind};
+use syntax::Resolver;
 
 use anyhow::Result;
 use clap::{Args, Parser as ClapParser, Subcommand};
@@ -13,13 +14,20 @@ struct Gelato {
 
 #[derive(Subcommand, Debug)]
 enum Command {
-    Lex(SourceArgs),
-    Parse(SourceArgs),
+    Lex(LexArgs),
+    Parse(ParseArgs),
 }
 
 #[derive(Args, Debug)]
-struct SourceArgs {
+struct LexArgs {
     source: PathBuf,
+}
+
+#[derive(Args, Debug)]
+struct ParseArgs {
+    source: PathBuf,
+    #[clap(long, action)]
+    resolve: bool,
 }
 
 fn main() -> Result<()> {
@@ -41,7 +49,13 @@ fn main() -> Result<()> {
             let source_file = SourceFile::load(&args.source)?;
             let mut parser = Parser::new(&source_file);
             let block = parser.parse()?;
-            println!("{:#?}", block);
+
+            if args.resolve {
+                let mut resolver = Resolver::new();
+                println!("{:#?}", resolver.resolve(block)?);
+            } else {
+                println!("{:#?}", block);
+            }
         }
     }
 

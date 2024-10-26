@@ -1,0 +1,11 @@
+let x = 10
+let y = 20
+
+if x < y then
+    let x = x + y
+    let y = 2
+else
+    x = x - y
+end
+
+let z = x

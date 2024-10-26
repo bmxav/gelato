@@ -115,6 +115,7 @@ dependencies = [
  "ast",
  "clap",
  "parser",
+ "syntax",
 ]
 
 [[package]]
@@ -170,6 +171,14 @@ dependencies = [
  "proc-macro2",
  "quote",
  "unicode-ident",
+]
+
+[[package]]
+name = "syntax"
+version = "0.1.0"
+dependencies = [
+ "ast",
+ "thiserror",
 ]
 
 [[package]]

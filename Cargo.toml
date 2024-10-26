@@ -3,6 +3,7 @@ members = [
     "crates/ast",
     "crates/gelato",
     "crates/parser",
+    "crates/syntax",
 ]
 resolver = "2"
 
@@ -16,6 +17,7 @@ rust-version = "1.82"
 [workspace.dependencies]
 ast = { path = "crates/ast" }
 parser = { path = "crates/parser" }
+syntax = { path = "crates/syntax" }
 
 anyhow = "1.0.91"
 thiserror = "1.0.65"
