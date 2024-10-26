@@ -1,7 +1,3 @@
-mod writer;
-
-pub use writer::Writer;
-
 #[derive(Debug)]
 pub enum BinaryOp {
     Add,
@@ -34,8 +30,8 @@ pub enum Expr {
     },
     If {
         cond: Box<Expr>,
-        then: Box<Expr>,
-        els: Option<Box<Expr>>,
+        then: Vec<Node>,
+        els: Option<Vec<Node>>,
     }
 }
 
@@ -52,51 +48,8 @@ pub enum Stmt {
 }
 
 #[derive(Debug)]
-pub struct Block {
-    children: Vec<Node>,
-}
-
-impl Block {
-    pub fn new() -> Self {
-        Self {
-            children: Vec::new(),
-        }
-    }
-
-    pub fn add_child(&mut self, node: Node) {
-        self.children.push(node)
-    }
-
-    pub fn iter(&self) -> BlockIterator {
-        BlockIterator {
-            block: self,
-            index: 0,
-        }
-    }
-}
-
-pub struct BlockIterator<'a> {
-    block: &'a Block,
-    index: usize,
-}
-
-impl<'a> Iterator for BlockIterator<'a> {
-    type Item = &'a Node;
-
-    fn next(&mut self) -> Option<Self::Item> {
-        if self.index < self.block.children.len() {
-            let node = &self.block.children[self.index];
-            self.index += 1;
-            Some(node)
-        } else {
-            None
-        }
-    }
-}
-
-#[derive(Debug)]
 pub enum Node {
-    Block(Block),
+    Block(Vec<Node>),
     Stmt(Stmt),
     Expr(Expr),
 }

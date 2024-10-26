@@ -1,5 +1,4 @@
-use lex::{Lexer, TokenKind};
-use parse::{Parser, SourceFile};
+use parser::{Lexer, Parser, SourceFile, TokenKind};
 
 use anyhow::Result;
 use clap::{Args, Parser as ClapParser, Subcommand};
@@ -42,8 +41,7 @@ fn main() -> Result<()> {
             let source_file = SourceFile::load(&args.source)?;
             let mut parser = Parser::new(&source_file);
             let block = parser.parse()?;
-            let mut writer = ast::Writer::new(std::io::stdout(), 2);
-            writer.write(&block)?;
+            println!("{:#?}", block);
         }
     }
 

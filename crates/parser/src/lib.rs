@@ -1,9 +1,10 @@
 mod errors;
+mod lexer;
+mod token;
 
-pub use crate::errors::*;
-
-use ast;
-use lex::{Lexer, Token, TokenKind};
+pub use crate::errors::{ParseError, ParseErrorKind};
+pub use crate::lexer::Lexer;
+pub use crate::token::{Token, TokenKind};
 
 use std::path::{Path, PathBuf};
 
@@ -66,7 +67,11 @@ impl<'a> Parser<'a> {
         // When modules are in place, it may be worth looking into implementing
         // implicit entry points for a single module. This would allow for expressions in
         // the top-level block and have a "main()" function generated for it.
-        let mut block = ast::Block::new();
+        self.parse_block().map(|block| ast::Node::Block(block))
+    }
+
+    fn parse_block(&mut self) -> Result<Vec<ast::Node>, ParseError> {
+        let mut block = Vec::new();
 
         loop {
             //TODO(bmxav): Don't return errors immediately. They should be recorded and parsing
@@ -75,15 +80,15 @@ impl<'a> Parser<'a> {
             let node = match self.next_token.kind {
                 TokenKind::Import => ast::Node::Stmt(self.parse_import_stmt()?),
                 TokenKind::Let => ast::Node::Stmt(self.parse_let_decl()?),
-                TokenKind::Eof => break,
+                TokenKind::Else | TokenKind::End | TokenKind::Eof => break,
                 _ => {
                     ast::Node::Expr(self.parse_expr(1)?)
                 }
             };
-            block.add_child(node);
+            block.push(node);
         }
 
-        Ok(ast::Node::Block(block))
+        Ok(block)
     }
 
     fn parse_import_stmt(&mut self) -> Result<ast::Stmt, ParseError> {
@@ -145,14 +150,12 @@ impl<'a> Parser<'a> {
 
                 let cond = Box::new(self.parse_expr(1)?);
 
-                let then = self.expect(TokenKind::Then)
-                    .and_then(|_| self.parse_expr(1))
-                    .map(Box::new)?;
+                let _ = self.expect(TokenKind::Then);
+                let then = self.parse_block()?;
 
                 let els = self.matches(TokenKind::Else)
-                    .map(|_| self.parse_expr(1))
-                    .transpose()?
-                    .map(Box::new);
+                    .map(|_| self.parse_block())
+                    .transpose()?;
 
                 let _ = self.expect(TokenKind::End)?;
 

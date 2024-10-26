@@ -2,8 +2,7 @@
 members = [
     "crates/ast",
     "crates/gelato",
-    "crates/lex",
-    "crates/parse",
+    "crates/parser",
 ]
 resolver = "2"
 
@@ -16,8 +15,7 @@ rust-version = "1.82"
 
 [workspace.dependencies]
 ast = { path = "crates/ast" }
-lex = { path = "crates/lex" }
-parse = { path = "crates/parse" }
+parser = { path = "crates/parser" }
 
 anyhow = "1.0.91"
 thiserror = "1.0.65"
