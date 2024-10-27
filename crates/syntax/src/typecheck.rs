@@ -66,6 +66,10 @@ impl TypeChecker {
                 let ty = self.type_check_expr(&expr)?;
                 self.identifier_types.insert(identifier.clone(), ty);
             }
+            Stmt::VarDecl { identifier, expr } => {
+                let ty = self.type_check_expr(&expr)?;
+                self.identifier_types.insert(identifier.clone(), ty);
+            }
         }
         Ok(Type::Unit)
     }

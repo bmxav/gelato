@@ -53,6 +53,7 @@ pub enum TokenKind {
     Import,
     Let,
     Then,
+    Var,
 
     Eof,
 }

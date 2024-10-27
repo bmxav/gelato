@@ -80,6 +80,7 @@ impl<'a> Parser<'a> {
             let node = match self.next_token.kind {
                 TokenKind::Import => ast::BlockItem::Stmt(self.parse_import_stmt()?),
                 TokenKind::Let => ast::BlockItem::Stmt(self.parse_let_decl()?),
+                TokenKind::Var => ast::BlockItem::Stmt(self.parse_var_decl()?),
                 TokenKind::Else | TokenKind::End | TokenKind::Eof => break,
                 _ => ast::BlockItem::Expr(self.parse_expr(1)?),
             };
@@ -112,6 +113,15 @@ impl<'a> Parser<'a> {
         let expr = self.parse_expr(1)?;
 
         Ok(ast::Stmt::LetDecl { identifier, expr })
+    }
+
+    fn parse_var_decl(&mut self) -> Result<ast::Stmt, ParseError> {
+        let _ = self.expect(TokenKind::Var)?;
+        let identifier = self.parse_identifier()?;
+        self.expect(TokenKind::Eq)?;
+        let expr = self.parse_expr(1)?;
+
+        Ok(ast::Stmt::VarDecl { identifier, expr })
     }
 
     fn parse_expr(&mut self, min_precedence: u8) -> Result<ast::Expr, ParseError> {

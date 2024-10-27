@@ -52,6 +52,10 @@ pub enum Stmt {
         identifier: String,
         expr: Expr,
     },
+    VarDecl {
+        identifier: String,
+        expr: Expr,
+    }
 }
 
 #[derive(Debug)]

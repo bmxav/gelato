@@ -61,6 +61,14 @@ impl Resolver {
                     expr: resolved,
                 }
             }
+            Stmt::VarDecl { identifier, expr } => {
+                let resolved = self.resolve_expr(expr)?;
+                let id = self.new_binding(&identifier, true)?;
+                Stmt::VarDecl {
+                    identifier: id,
+                    expr: resolved,
+                }
+            }
         };
         Ok(resolved)
     }

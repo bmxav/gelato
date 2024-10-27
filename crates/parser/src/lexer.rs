@@ -213,6 +213,7 @@ impl<'a> Lexer<'a> {
             "let" => TokenKind::Let,
             "then" => TokenKind::Then,
             "or" => TokenKind::Or,
+            "var" => TokenKind::Var,
             _ => return None,
         };
         Some(kind)
