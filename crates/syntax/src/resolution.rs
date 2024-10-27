@@ -41,10 +41,11 @@ impl Resolver {
         let resolved = match stmt {
             Stmt::Import { .. } => stmt,
             Stmt::LetDecl { identifier, expr } => {
+                let resolved = self.resolve_expr(expr)?;
                 let id = self.new_id(&identifier)?;
                 Stmt::LetDecl {
                     identifier: id,
-                    expr: self.resolve_expr(expr)?,
+                    expr: resolved,
                 }
             }
         };
