@@ -1,4 +1,4 @@
-use ast::{BinaryOp, Expr, Node, Stmt};
+use ast::{BinaryOp, BlockItem, Expr, Node, Stmt};
 use thiserror::Error;
 
 use std::collections::HashMap;
@@ -30,32 +30,43 @@ impl Resolver {
     pub fn resolve(&mut self, node: Node) -> Result<Node, ResolutionError> {
 
         let resolved_node = match node {
-            Node::Stmt(Stmt::Import { .. }) => node,
-            Node::Stmt(Stmt::LetDecl { identifier, expr }) => {
-                let id = self.new_id(&identifier)?;
-                Node::Stmt(Stmt::LetDecl {
-                    identifier: id,
-                    expr: self.resolve_expr(expr)?,
-                })
-            }
-            Node::Block(block) => Node::Block(self.resolve_block(block)?),
+            Node::Stmt(stmt) => Node::Stmt(self.resolve_stmt(stmt)?),
             Node::Expr(expr) => Node::Expr(self.resolve_expr(expr)?),
         };
 
         Ok(resolved_node)
     }
 
-    fn resolve_block(&mut self, block: Vec<Node>) -> Result<Vec<Node>, ResolutionError> {
+    fn resolve_stmt(&mut self, stmt: Stmt) -> Result<Stmt, ResolutionError> {
+        let resolved = match stmt {
+            Stmt::Import { .. } => stmt,
+            Stmt::LetDecl { identifier, expr } => {
+                let id = self.new_id(&identifier)?;
+                Stmt::LetDecl {
+                    identifier: id,
+                    expr: self.resolve_expr(expr)?,
+                }
+            }
+        };
+        Ok(resolved)
+    }
+
+    fn resolve_block(&mut self, block: Vec<BlockItem>) -> Result<Expr, ResolutionError> {
         self.scopes.push(HashMap::new());
 
-        let nodes: Result<Vec<Node>, ResolutionError> = block
-            .into_iter()
-            .map(|n| self.resolve(n))
-            .collect();
+        let mut items = Vec::with_capacity(block.len());
+
+        for item in block {
+            let resolved = match item {
+                BlockItem::Stmt(stmt) => BlockItem::Stmt(self.resolve_stmt(stmt)?),
+                BlockItem::Expr(expr) => BlockItem::Expr(self.resolve_expr(expr)?),
+            };
+            items.push(resolved);
+        }
 
         self.scopes.pop();
 
-        Ok(nodes?)
+        Ok(Expr::Block(items))
     }
 
     fn resolve_expr(&mut self, expr: Expr) -> Result<Expr, ResolutionError> {
@@ -81,9 +92,12 @@ impl Resolver {
             Expr::If { cond, then, els } => {
                 Expr::If {
                     cond: Box::new(self.resolve_expr(*cond)?),
-                    then: self.resolve_block(then)?,
-                    els: els.map(|e| self.resolve_block(e)).transpose()?,
+                    then: Box::new(self.resolve_expr(*then)?),
+                    els: els.map(|e| self.resolve_expr(*e)).transpose()?.map(Box::new),
                 }
+            }
+            Expr::Block(items) => {
+                self.resolve_block(items)?
             }
             _ => expr,
         };

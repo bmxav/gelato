@@ -19,6 +19,12 @@ pub enum BinaryOp {
 }
 
 #[derive(Debug)]
+pub enum BlockItem {
+    Stmt(Stmt),
+    Expr(Expr),
+}
+
+#[derive(Debug)]
 pub enum Expr {
     Identifier(String),
     String(String),
@@ -30,9 +36,10 @@ pub enum Expr {
     },
     If {
         cond: Box<Expr>,
-        then: Vec<Node>,
-        els: Option<Vec<Node>>,
-    }
+        then: Box<Expr>,
+        els: Option<Box<Expr>>,
+    },
+    Block(Vec<BlockItem>),
 }
 
 #[derive(Debug)]
@@ -49,7 +56,6 @@ pub enum Stmt {
 
 #[derive(Debug)]
 pub enum Node {
-    Block(Vec<Node>),
     Stmt(Stmt),
     Expr(Expr),
 }

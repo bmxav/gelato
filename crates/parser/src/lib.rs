@@ -67,10 +67,10 @@ impl<'a> Parser<'a> {
         // When modules are in place, it may be worth looking into implementing
         // implicit entry points for a single module. This would allow for expressions in
         // the top-level block and have a "main()" function generated for it.
-        self.parse_block().map(|block| ast::Node::Block(block))
+        self.parse_block().map(|block| ast::Node::Expr(block))
     }
 
-    fn parse_block(&mut self) -> Result<Vec<ast::Node>, ParseError> {
+    fn parse_block(&mut self) -> Result<ast::Expr, ParseError> {
         let mut block = Vec::new();
 
         loop {
@@ -78,17 +78,15 @@ impl<'a> Parser<'a> {
             // should continue from the next synchronization point. Any errors can then be
             // reported at the very end.
             let node = match self.next_token.kind {
-                TokenKind::Import => ast::Node::Stmt(self.parse_import_stmt()?),
-                TokenKind::Let => ast::Node::Stmt(self.parse_let_decl()?),
+                TokenKind::Import => ast::BlockItem::Stmt(self.parse_import_stmt()?),
+                TokenKind::Let => ast::BlockItem::Stmt(self.parse_let_decl()?),
                 TokenKind::Else | TokenKind::End | TokenKind::Eof => break,
-                _ => {
-                    ast::Node::Expr(self.parse_expr(1)?)
-                }
+                _ => ast::BlockItem::Expr(self.parse_expr(1)?),
             };
             block.push(node);
         }
 
-        Ok(block)
+        Ok(ast::Expr::Block(block))
     }
 
     fn parse_import_stmt(&mut self) -> Result<ast::Stmt, ParseError> {
@@ -159,7 +157,7 @@ impl<'a> Parser<'a> {
 
                 let _ = self.expect(TokenKind::End)?;
 
-                ast::Expr::If { cond, then, els }
+                ast::Expr::If { cond, then: Box::new(then), els: els.map(Box::new) }
             }
             TokenKind::LeftParen => {
                 let _ = self.expect(TokenKind::LeftParen)?;
