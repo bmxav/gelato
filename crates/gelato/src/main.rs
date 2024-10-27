@@ -1,5 +1,5 @@
 use parser::{Lexer, Parser, SourceFile, TokenKind};
-use syntax::Resolver;
+use syntax::{Resolver, TypeChecker};
 
 use anyhow::Result;
 use clap::{Args, Parser as ClapParser, Subcommand};
@@ -28,6 +28,8 @@ struct ParseArgs {
     source: PathBuf,
     #[clap(long, action)]
     resolve: bool,
+    #[clap(long, action)]
+    type_check: bool,
 }
 
 fn main() -> Result<()> {
@@ -48,11 +50,17 @@ fn main() -> Result<()> {
         Command::Parse(args) => {
             let source_file = SourceFile::load(&args.source)?;
             let mut parser = Parser::new(&source_file);
-            let block = parser.parse()?;
+            let mut block = parser.parse()?;
 
             if args.resolve {
                 let mut resolver = Resolver::new();
-                println!("{:#?}", resolver.resolve(block)?);
+                block = resolver.resolve(block)?;
+            }
+
+            if args.type_check {
+                let mut type_checker = TypeChecker::new();
+                let typed_block = type_checker.type_check(block)?;
+                println!("{:#?}", typed_block);
             } else {
                 println!("{:#?}", block);
             }
