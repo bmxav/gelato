@@ -6,6 +6,8 @@ pub use crate::errors::{ParseError, ParseErrorKind};
 pub use crate::lexer::Lexer;
 pub use crate::token::{Token, TokenKind};
 
+use ast::{AstNode, BinaryOp, Expr, ExprNode, StmtNode};
+
 use std::path::{Path, PathBuf};
 
 pub struct SourceFile {
@@ -59,7 +61,7 @@ impl<'a> Parser<'a> {
         }
     }
 
-    pub fn parse(&mut self) -> Result<ast::Node, ParseError> {
+    pub fn parse(&mut self) -> Result<AstNode, ParseError> {
         //TODO(bmxav): Add the concept of files and modules. For now we will just use a
         // `Block` as the root node. When this changes we will no longer allow expressions
         // to appear in the top-level block, only statements.
@@ -67,10 +69,10 @@ impl<'a> Parser<'a> {
         // When modules are in place, it may be worth looking into implementing
         // implicit entry points for a single module. This would allow for expressions in
         // the top-level block and have a "main()" function generated for it.
-        self.parse_block().map(|block| ast::Node::Expr(block))
+        self.parse_block().map(|block| AstNode::Expr(block))
     }
 
-    fn parse_block(&mut self) -> Result<ast::Expr, ParseError> {
+    fn parse_block(&mut self) -> Result<ExprNode, ParseError> {
         let mut block = Vec::new();
 
         loop {
@@ -78,53 +80,36 @@ impl<'a> Parser<'a> {
             // should continue from the next synchronization point. Any errors can then be
             // reported at the very end.
             let node = match self.next_token.kind {
-                TokenKind::Import => ast::BlockItem::Stmt(self.parse_import_stmt()?),
-                TokenKind::Let => ast::BlockItem::Stmt(self.parse_let_decl()?),
-                TokenKind::Var => ast::BlockItem::Stmt(self.parse_var_decl()?),
+                TokenKind::Let => AstNode::Stmt(self.parse_let_decl()?),
+                TokenKind::Var => AstNode::Stmt(self.parse_var_decl()?),
                 TokenKind::Else | TokenKind::End | TokenKind::Eof => break,
-                _ => ast::BlockItem::Expr(self.parse_expr(1)?),
+                _ => AstNode::Expr(self.parse_expr(1)?),
             };
             block.push(node);
         }
 
-        Ok(ast::Expr::Block(block))
+        Ok(ExprNode::new(Expr::Block(block)))
     }
 
-    fn parse_import_stmt(&mut self) -> Result<ast::Stmt, ParseError> {
-        let _ = self.expect(TokenKind::Import)?;
-
-        let path = self.parse_string_literal()?;
-
-        // Check if there is an import alias present.
-        let alias = if self.matches(TokenKind::As).is_some() {
-            let token = self.expect(TokenKind::Identifier)?;
-            Some(token.text.to_string())
-        } else {
-            None
-        };
-
-        Ok(ast::Stmt::Import { path, alias })
-    }
-
-    fn parse_let_decl(&mut self) -> Result<ast::Stmt, ParseError> {
+    fn parse_let_decl(&mut self) -> Result<StmtNode, ParseError> {
         let _ = self.expect(TokenKind::Let)?;
         let identifier = self.parse_identifier()?;
         self.expect(TokenKind::Eq)?;
         let expr = self.parse_expr(1)?;
 
-        Ok(ast::Stmt::LetDecl { identifier, expr })
+        Ok(StmtNode::Let { identifier, expr })
     }
 
-    fn parse_var_decl(&mut self) -> Result<ast::Stmt, ParseError> {
+    fn parse_var_decl(&mut self) -> Result<StmtNode, ParseError> {
         let _ = self.expect(TokenKind::Var)?;
         let identifier = self.parse_identifier()?;
         self.expect(TokenKind::Eq)?;
         let expr = self.parse_expr(1)?;
 
-        Ok(ast::Stmt::VarDecl { identifier, expr })
+        Ok(StmtNode::Var{ identifier, expr })
     }
 
-    fn parse_expr(&mut self, min_precedence: u8) -> Result<ast::Expr, ParseError> {
+    fn parse_expr(&mut self, min_precedence: u8) -> Result<ExprNode, ParseError> {
         let mut left = self.parse_factor()?;
 
         loop {
@@ -135,11 +120,11 @@ impl<'a> Parser<'a> {
                     let _ = self.consume();
 
                     let right = self.parse_expr(self.precedence(&op) + 1)?;
-                    left = ast::Expr::BinaryExpr {
+                    left = ExprNode::new(Expr::BinaryExpr {
                         op: op,
                         left: Box::new(left),
                         right: Box::new(right),
-                    };
+                    });
                 }
                 _ => break
             }
@@ -148,11 +133,11 @@ impl<'a> Parser<'a> {
         Ok(left)
     }
 
-    fn parse_factor(&mut self) -> Result<ast::Expr, ParseError> {
+    fn parse_factor(&mut self) -> Result<ExprNode, ParseError> {
         let factor = match self.next_token.kind {
-            TokenKind::Int => ast::Expr::Int(self.parse_int_constant()?),
-            TokenKind::String { .. } => ast::Expr::String(self.parse_string_literal()?),
-            TokenKind::Identifier => ast::Expr::Identifier(self.parse_identifier()?),
+            TokenKind::Int => ExprNode::new(Expr::Int(self.parse_int_constant()?)),
+            TokenKind::String { .. } => ExprNode::new(Expr::String(self.parse_string_literal()?)),
+            TokenKind::Identifier => ExprNode::new(Expr::Identifier(self.parse_identifier()?)),
             TokenKind::If => {
                 let _ = self.expect(TokenKind::If)?;
 
@@ -167,7 +152,7 @@ impl<'a> Parser<'a> {
 
                 let _ = self.expect(TokenKind::End)?;
 
-                ast::Expr::If { cond, then: Box::new(then), els: els.map(Box::new) }
+                ExprNode::new(Expr::If { cond, then: Box::new(then), els: els.map(Box::new) })
             }
             TokenKind::LeftParen => {
                 let _ = self.expect(TokenKind::LeftParen)?;
@@ -289,42 +274,42 @@ impl<'a> Parser<'a> {
         }
     }
 
-    fn binary_op(&self, kind: TokenKind) -> Option<ast::BinaryOp> {
+    fn binary_op(&self, kind: TokenKind) -> Option<BinaryOp> {
         let op = match kind {
-            TokenKind::Plus => ast::BinaryOp::Add,
-            TokenKind::Minus => ast::BinaryOp::Sub,
-            TokenKind::Star => ast::BinaryOp::Mul,
-            TokenKind::Slash => ast::BinaryOp::Div,
-            TokenKind::Eq => ast::BinaryOp::Assign,
-            TokenKind::PlusEq => ast::BinaryOp::PlusAssign,
-            TokenKind::MinusEq => ast::BinaryOp::MinusAssign,
-            TokenKind::EqEq => ast::BinaryOp::Eq,
-            TokenKind::BangEq => ast::BinaryOp::NotEq,
-            TokenKind::LessThan => ast::BinaryOp::LessThan,
-            TokenKind::LessThanEq => ast::BinaryOp::LessThanEq,
-            TokenKind::GreaterThan => ast::BinaryOp::GreaterThan,
-            TokenKind::GreaterThanEq => ast::BinaryOp::GreaterThanEq,
-            TokenKind::Dot => ast::BinaryOp::MemberAccess,
-            TokenKind::And => ast::BinaryOp::And,
-            TokenKind::Or => ast::BinaryOp::Or,
+            TokenKind::Plus => BinaryOp::Add,
+            TokenKind::Minus => BinaryOp::Sub,
+            TokenKind::Star => BinaryOp::Mul,
+            TokenKind::Slash => BinaryOp::Div,
+            TokenKind::Eq => BinaryOp::Assign,
+            TokenKind::PlusEq => BinaryOp::PlusAssign,
+            TokenKind::MinusEq => BinaryOp::MinusAssign,
+            TokenKind::EqEq => BinaryOp::Eq,
+            TokenKind::BangEq => BinaryOp::NotEq,
+            TokenKind::LessThan => BinaryOp::LessThan,
+            TokenKind::LessThanEq => BinaryOp::LessThanEq,
+            TokenKind::GreaterThan => BinaryOp::GreaterThan,
+            TokenKind::GreaterThanEq => BinaryOp::GreaterThanEq,
+            TokenKind::Dot => BinaryOp::MemberAccess,
+            TokenKind::And => BinaryOp::And,
+            TokenKind::Or => BinaryOp::Or,
             _ => return None,
         };
         Some(op)
     }
 
-    fn precedence(&self, op: &ast::BinaryOp) -> u8 {
+    fn precedence(&self, op: &BinaryOp) -> u8 {
         match op {
-            ast::BinaryOp::MemberAccess => 60,
-            ast::BinaryOp::Mul | ast::BinaryOp::Div => 50,
-            ast::BinaryOp::Add | ast::BinaryOp::Sub => 40,
-            ast::BinaryOp::LessThan
-                | ast::BinaryOp::LessThanEq
-                | ast::BinaryOp::GreaterThan
-                | ast::BinaryOp::GreaterThanEq => 35,
-            ast::BinaryOp::Eq | ast::BinaryOp::NotEq => 30,
-            ast::BinaryOp::And => 10,
-            ast::BinaryOp::Or => 5,
-            ast::BinaryOp::Assign | ast::BinaryOp::PlusAssign | ast::BinaryOp::MinusAssign => 1,
+            BinaryOp::MemberAccess => 60,
+            BinaryOp::Mul | BinaryOp::Div => 50,
+            BinaryOp::Add | BinaryOp::Sub => 40,
+            BinaryOp::LessThan
+                | BinaryOp::LessThanEq
+                | BinaryOp::GreaterThan
+                | BinaryOp::GreaterThanEq => 35,
+            BinaryOp::Eq | BinaryOp::NotEq => 30,
+            BinaryOp::And => 10,
+            BinaryOp::Or => 5,
+            BinaryOp::Assign | BinaryOp::PlusAssign | BinaryOp::MinusAssign => 1,
         }
     }
 }

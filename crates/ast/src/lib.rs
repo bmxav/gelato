@@ -19,47 +19,55 @@ pub enum BinaryOp {
 }
 
 #[derive(Debug)]
-pub enum BlockItem {
-    Stmt(Stmt),
-    Expr(Expr),
+pub struct TExprNode<T> {
+    pub expr: TExpr<T>,
+    pub t: T,
 }
 
 #[derive(Debug)]
-pub enum Expr {
+pub enum TExpr<T> {
     Identifier(String),
     String(String),
     Int(i64),
     BinaryExpr {
         op: BinaryOp,
-        left: Box<Expr>,
-        right: Box<Expr>,
+        left: Box<TExprNode<T>>,
+        right: Box<TExprNode<T>>,
     },
     If {
-        cond: Box<Expr>,
-        then: Box<Expr>,
-        els: Option<Box<Expr>>,
+        cond: Box<TExprNode<T>>,
+        then: Box<TExprNode<T>>,
+        els: Option<Box<TExprNode<T>>>,
     },
-    Block(Vec<BlockItem>),
+    Block(Vec<TAstNode<T>>),
 }
 
 #[derive(Debug)]
-pub enum Stmt {
-    Import {
-        path: String,
-        alias: Option<String>,
-    },
-    LetDecl {
+pub enum TStmtNode<T> {
+    Let {
         identifier: String,
-        expr: Expr,
+        expr: TExprNode<T>,
     },
-    VarDecl {
+    Var {
         identifier: String,
-        expr: Expr,
+        expr: TExprNode<T>,
+   }
+}
+
+#[derive(Debug)]
+pub enum TAstNode<T> {
+    Stmt(TStmtNode<T>),
+    Expr(TExprNode<T>),
+}
+
+pub type Expr = TExpr<()>;
+pub type ExprNode = TExprNode<()>;
+
+impl ExprNode {
+    pub fn new(expr: Expr) -> ExprNode {
+        ExprNode { expr, t: () }
     }
 }
 
-#[derive(Debug)]
-pub enum Node {
-    Stmt(Stmt),
-    Expr(Expr),
-}
+pub type StmtNode = TStmtNode<()>;
+pub type AstNode = TAstNode<()>;

@@ -1,4 +1,4 @@
-use ast::{BinaryOp, BlockItem, Expr, Node, Stmt};
+use ast::{AstNode, BinaryOp, Expr, ExprNode, StmtNode};
 use thiserror::Error;
 
 use std::collections::HashMap;
@@ -40,31 +40,30 @@ impl Resolver {
         }
     }
 
-    pub fn resolve(&mut self, node: Node) -> Result<Node, ResolutionError> {
+    pub fn resolve(&mut self, node: AstNode) -> Result<AstNode, ResolutionError> {
 
         let resolved_node = match node {
-            Node::Stmt(stmt) => Node::Stmt(self.resolve_stmt(stmt)?),
-            Node::Expr(expr) => Node::Expr(self.resolve_expr(expr)?),
+            AstNode::Stmt(stmt) => AstNode::Stmt(self.resolve_stmt(stmt)?),
+            AstNode::Expr(expr) => AstNode::Expr(self.resolve_expr(expr)?),
         };
 
         Ok(resolved_node)
     }
 
-    fn resolve_stmt(&mut self, stmt: Stmt) -> Result<Stmt, ResolutionError> {
+    fn resolve_stmt(&mut self, stmt: StmtNode) -> Result<StmtNode, ResolutionError> {
         let resolved = match stmt {
-            Stmt::Import { .. } => stmt,
-            Stmt::LetDecl { identifier, expr } => {
+            StmtNode::Let { identifier, expr } => {
                 let resolved = self.resolve_expr(expr)?;
                 let id = self.new_binding(&identifier, false)?;
-                Stmt::LetDecl {
+                StmtNode::Let {
                     identifier: id,
                     expr: resolved,
                 }
             }
-            Stmt::VarDecl { identifier, expr } => {
+            StmtNode::Var { identifier, expr } => {
                 let resolved = self.resolve_expr(expr)?;
                 let id = self.new_binding(&identifier, true)?;
-                Stmt::VarDecl {
+                StmtNode::Var {
                     identifier: id,
                     expr: resolved,
                 }
@@ -73,15 +72,15 @@ impl Resolver {
         Ok(resolved)
     }
 
-    fn resolve_block(&mut self, block: Vec<BlockItem>) -> Result<Expr, ResolutionError> {
+    fn resolve_block(&mut self, block: Vec<AstNode>) -> Result<Expr, ResolutionError> {
         self.scopes.push(HashMap::new());
 
         let mut items = Vec::with_capacity(block.len());
 
         for item in block {
             let resolved = match item {
-                BlockItem::Stmt(stmt) => BlockItem::Stmt(self.resolve_stmt(stmt)?),
-                BlockItem::Expr(expr) => BlockItem::Expr(self.resolve_expr(expr)?),
+                AstNode::Stmt(stmt) => AstNode::Stmt(self.resolve_stmt(stmt)?),
+                AstNode::Expr(expr) => AstNode::Expr(self.resolve_expr(expr)?),
             };
             items.push(resolved);
         }
@@ -91,11 +90,11 @@ impl Resolver {
         Ok(Expr::Block(items))
     }
 
-    fn resolve_expr(&mut self, expr: Expr) -> Result<Expr, ResolutionError> {
-        let resolved = match expr {
+    fn resolve_expr(&mut self, expr: ExprNode) -> Result<ExprNode, ResolutionError> {
+        let resolved = match expr.expr {
             Expr::Identifier(ident) => Expr::Identifier(self.find_binding(&ident)?.id.clone()),
             Expr::BinaryExpr { op: BinaryOp::Assign, left, right } => {
-                let left_resolved = match *left {
+                let left_resolved = match left.expr {
                     Expr::Identifier(ident) if !self.find_binding(&ident)?.mutable => {
                         return Err(ResolutionError::ImmutableAssignment(ident.clone()))
                     }
@@ -130,9 +129,9 @@ impl Resolver {
             Expr::Block(items) => {
                 self.resolve_block(items)?
             }
-            _ => expr,
+            e => e,
         };
-        Ok(resolved)
+        Ok(ExprNode::new(resolved))
     }
 
     fn new_binding(&mut self, identifier: &str, mutable: bool) -> Result<String, ResolutionError> {
