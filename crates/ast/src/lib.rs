@@ -29,6 +29,7 @@ pub enum TExpr<T> {
     Identifier(String),
     String(String),
     Int(i64),
+    Bool(bool),
     BinaryExpr {
         op: BinaryOp,
         left: Box<TExprNode<T>>,

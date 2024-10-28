@@ -9,3 +9,7 @@ var y = x
 y += 20
 
 let s = "This is a string"
+
+let a = true
+let b = false
+let c = a and b

@@ -6,6 +6,8 @@ pub enum TokenKind {
     Identifier,
     Int,
     String { terminated: bool },
+    True,
+    False,
 
     // Assignment
     Eq,

@@ -138,6 +138,8 @@ impl<'a> Parser<'a> {
             TokenKind::Int => ExprNode::new(Expr::Int(self.parse_int_constant()?)),
             TokenKind::String { .. } => ExprNode::new(Expr::String(self.parse_string_literal()?)),
             TokenKind::Identifier => ExprNode::new(Expr::Identifier(self.parse_identifier()?)),
+            TokenKind::True => ExprNode::new(Expr::Bool(self.parse_true_literal()?)),
+            TokenKind::False => ExprNode::new(Expr::Bool(self.parse_false_literal()?)),
             TokenKind::If => {
                 let _ = self.expect(TokenKind::If)?;
 
@@ -213,6 +215,16 @@ impl<'a> Parser<'a> {
         let value = token.text.parse::<i64>()
             .map_err(|_| self.emit_token_error(&token, ParseErrorKind::InvalidIntLiteral(token.text.to_string())))?;
         Ok(value)
+    }
+
+    fn parse_true_literal(&mut self) -> Result<bool, ParseError> {
+        let _ = self.expect(TokenKind::True)?;
+        Ok(true)
+    }
+
+    fn parse_false_literal(&mut self) -> Result<bool, ParseError> {
+        let _ = self.expect(TokenKind::False)?;
+        Ok(false)
     }
 
     fn consume(&mut self) -> Token<'a> {

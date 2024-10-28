@@ -8,6 +8,7 @@ use std::collections::HashMap;
 pub enum Type {
     Int,
     String,
+    Bool,
     Unit,
 }
 
@@ -32,6 +33,8 @@ pub type TypedAstNode = TAstNode<Type>;
 pub enum TypeError {
     #[error("type mismatch '{0:?}' and '{1:?}'")]
     TypeMismatch(Type, Type),
+    #[error("expected type '{found:?}' but found '{expected:?}'")]
+    UnexpectedType { expected: Type, found: Type },
     #[error("unknown type for identifier '{0}'")]
     UnknownType(String),
 }
@@ -75,6 +78,7 @@ impl TypeChecker {
         let typed = match expr.expr {
             Expr::Int(n) => TypedExprNode { expr: TypedExpr::Int(n), t: Type::Int },
             Expr::String(s) => TypedExprNode { expr: TypedExpr::String(s), t: Type::String },
+            Expr::Bool(b) => TypedExprNode { expr: TypedExpr::Bool(b), t: Type::Bool },
             Expr::Identifier(ident) => {
                 let t = self.identifier_types.get(&ident)
                     .ok_or(TypeError::UnknownType(ident.clone()))?.clone();
@@ -89,7 +93,15 @@ impl TypeChecker {
 
                 let t = match op {
                     // Assignment operator will always be unit.
-                    BinaryOp::Assign => Type::Unit,
+                    BinaryOp::Assign | BinaryOp::PlusAssign | BinaryOp::MinusAssign  => Type::Unit,
+                    BinaryOp::And
+                        | BinaryOp::Eq
+                        | BinaryOp::GreaterThan
+                        | BinaryOp::GreaterThanEq
+                        | BinaryOp::LessThan
+                        | BinaryOp::LessThanEq
+                        | BinaryOp::Or
+                        | BinaryOp::NotEq => Type::Bool,
                     _ => left.t.clone(),
                 };
 
@@ -97,6 +109,10 @@ impl TypeChecker {
             }
             Expr::If { cond, then, els } => {
                 let cond = Box::new(self.type_check_expr(*cond)?);
+                if cond.t != Type::Bool {
+                    return Err(TypeError::UnexpectedType { expected: Type::Bool, found: cond.t });
+                }
+
                 let then = Box::new(self.type_check_expr(*then)?);
                 let els = match els.map(|e| self.type_check_expr(*e)).transpose()? {
                     Some(els) if then.t == els.t => Some(Box::new(els)),
