@@ -9,6 +9,7 @@ authors = { workspace = true }
 
 [dependencies]
 ast = { workspace = true }
+codegen = { workspace = true }
 parser = { workspace = true }
 syntax = { workspace = true }
 

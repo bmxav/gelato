@@ -1,9 +1,12 @@
+use codegen::{toolchain, CodeGen};
 use parser::{Lexer, Parser, SourceFile, TokenKind};
 use syntax::{Resolver, TypeChecker};
 
 use anyhow::Result;
 use clap::{Args, Parser as ClapParser, Subcommand};
 
+use std::fs::File;
+use std::io::{Cursor, Seek, SeekFrom, Write};
 use std::path::PathBuf;
 
 #[derive(ClapParser, Debug)]
@@ -16,6 +19,7 @@ struct Gelato {
 enum Command {
     Lex(LexArgs),
     Parse(ParseArgs),
+    Gen(GenArgs),
 }
 
 #[derive(Args, Debug)]
@@ -30,6 +34,13 @@ struct ParseArgs {
     resolve: bool,
     #[clap(long, action)]
     type_check: bool,
+}
+
+#[derive(Args, Debug)]
+struct GenArgs {
+    source: PathBuf,
+    #[clap(short, long)]
+    output: Option<PathBuf>,
 }
 
 fn main() -> Result<()> {
@@ -64,6 +75,34 @@ fn main() -> Result<()> {
             } else {
                 println!("{:#?}", block);
             }
+        }
+        Command::Gen(args) => {
+            let source_file = SourceFile::load(&args.source)?;
+            let mut parser = Parser::new(&source_file);
+            let mut block = parser.parse()?;
+
+            let mut resolver = Resolver::new();
+            block = resolver.resolve(block)?;
+
+            let mut type_checker = TypeChecker::new();
+            let typed_block = type_checker.type_check(block)?;
+
+            let mut cursor = Cursor::new(Vec::new());
+            let mut codegen = CodeGen::new(&mut cursor);
+            codegen.gen(&typed_block)?;
+            cursor.seek(SeekFrom::Start(0))?;
+            let formatted = toolchain::go_fmt(&mut cursor)?;
+
+            match &args.output {
+                Some(output) => {
+                    let mut file = File::create(output)?;
+                    file.write_all(formatted.as_bytes())?;
+                }
+                None => {
+                    println!("{}", formatted);
+                }
+            };
+
         }
     }
 

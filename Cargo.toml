@@ -1,6 +1,7 @@
 [workspace]
 members = [
     "crates/ast",
+    "crates/codegen",
     "crates/gelato",
     "crates/parser",
     "crates/syntax",
@@ -16,6 +17,7 @@ rust-version = "1.82"
 
 [workspace.dependencies]
 ast = { path = "crates/ast" }
+codegen = { path = "crates/codegen" }
 parser = { path = "crates/parser" }
 syntax = { path = "crates/syntax" }
 
