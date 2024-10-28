@@ -1,3 +1,5 @@
+use std::ops::Deref;
+
 #[derive(Debug)]
 pub enum BinaryOp {
     Add,
@@ -13,8 +15,8 @@ pub enum BinaryOp {
     And,
     Or,
     Assign,
-    PlusAssign,
-    MinusAssign,
+    AddAssign,
+    SubAssign,
     MemberAccess,
 }
 
@@ -24,9 +26,26 @@ pub struct TExprNode<T> {
     pub t: T,
 }
 
+#[derive(Clone, Debug, Eq, PartialEq, Hash)]
+pub struct Identifier(String);
+
+impl Identifier {
+    pub fn new(name: String) -> Self {
+        Self(name)
+    }
+}
+
+impl Deref for Identifier {
+    type Target = String;
+
+    fn deref(&self) -> &Self::Target {
+        &self.0
+    }
+}
+
 #[derive(Debug)]
 pub enum TExpr<T> {
-    Identifier(String),
+    Identifier(Identifier),
     String(String),
     Int(i64),
     Bool(bool),
@@ -46,11 +65,11 @@ pub enum TExpr<T> {
 #[derive(Debug)]
 pub enum TStmtNode<T> {
     Let {
-        identifier: String,
+        identifier: Identifier,
         expr: TExprNode<T>,
     },
     Var {
-        identifier: String,
+        identifier: Identifier,
         expr: TExprNode<T>,
    }
 }

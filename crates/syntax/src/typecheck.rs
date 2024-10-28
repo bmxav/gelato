@@ -1,4 +1,4 @@
-use ast::{AstNode, BinaryOp, Expr, ExprNode, StmtNode, TAstNode, TExpr, TExprNode, TStmtNode};
+use ast::{AstNode, BinaryOp, Expr, ExprNode, Identifier, StmtNode, TAstNode, TExpr, TExprNode, TStmtNode};
 
 use thiserror::Error;
 
@@ -40,7 +40,7 @@ pub enum TypeError {
 }
 
 pub struct TypeChecker {
-    identifier_types: HashMap<String, Type>,
+    identifier_types: HashMap<Identifier, Type>,
 }
 
 impl TypeChecker {
@@ -81,7 +81,7 @@ impl TypeChecker {
             Expr::Bool(b) => TypedExprNode { expr: TypedExpr::Bool(b), t: Type::Bool },
             Expr::Identifier(ident) => {
                 let t = self.identifier_types.get(&ident)
-                    .ok_or(TypeError::UnknownType(ident.clone()))?.clone();
+                    .ok_or(TypeError::UnknownType(ident.clone().to_string()))?.clone();
                 TypedExprNode { expr: TypedExpr::Identifier(ident), t: t }
             }
             Expr::BinaryExpr { op, left, right } => {
@@ -93,7 +93,7 @@ impl TypeChecker {
 
                 let t = match op {
                     // Assignment operator will always be unit.
-                    BinaryOp::Assign | BinaryOp::PlusAssign | BinaryOp::MinusAssign  => Type::Unit,
+                    BinaryOp::Assign | BinaryOp::AddAssign | BinaryOp::SubAssign  => Type::Unit,
                     BinaryOp::And
                         | BinaryOp::Eq
                         | BinaryOp::GreaterThan

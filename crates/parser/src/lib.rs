@@ -6,7 +6,7 @@ pub use crate::errors::{ParseError, ParseErrorKind};
 pub use crate::lexer::Lexer;
 pub use crate::token::{Token, TokenKind};
 
-use ast::{AstNode, BinaryOp, Expr, ExprNode, StmtNode};
+use ast::{AstNode, BinaryOp, Expr, ExprNode, Identifier, StmtNode};
 
 use std::path::{Path, PathBuf};
 
@@ -168,8 +168,8 @@ impl<'a> Parser<'a> {
         Ok(factor)
     }
 
-    fn parse_identifier(&mut self) -> Result<String, ParseError> {
-        self.expect(TokenKind::Identifier).map(|token| token.text.to_string())
+    fn parse_identifier(&mut self) -> Result<Identifier, ParseError> {
+        self.expect(TokenKind::Identifier).map(|token| Identifier::new(token.text.to_string()))
     }
 
     fn parse_string_literal(&mut self) -> Result<String, ParseError> {
@@ -293,8 +293,8 @@ impl<'a> Parser<'a> {
             TokenKind::Star => BinaryOp::Mul,
             TokenKind::Slash => BinaryOp::Div,
             TokenKind::Eq => BinaryOp::Assign,
-            TokenKind::PlusEq => BinaryOp::PlusAssign,
-            TokenKind::MinusEq => BinaryOp::MinusAssign,
+            TokenKind::PlusEq => BinaryOp::AddAssign,
+            TokenKind::MinusEq => BinaryOp::SubAssign,
             TokenKind::EqEq => BinaryOp::Eq,
             TokenKind::BangEq => BinaryOp::NotEq,
             TokenKind::LessThan => BinaryOp::LessThan,
@@ -321,7 +321,7 @@ impl<'a> Parser<'a> {
             BinaryOp::Eq | BinaryOp::NotEq => 30,
             BinaryOp::And => 10,
             BinaryOp::Or => 5,
-            BinaryOp::Assign | BinaryOp::PlusAssign | BinaryOp::MinusAssign => 1,
+            BinaryOp::Assign | BinaryOp::AddAssign | BinaryOp::SubAssign => 1,
         }
     }
 }

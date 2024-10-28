@@ -1,4 +1,4 @@
-use ast::{AstNode, BinaryOp, Expr, ExprNode, StmtNode};
+use ast::{AstNode, BinaryOp, Expr, ExprNode, Identifier, StmtNode};
 use thiserror::Error;
 
 use std::collections::HashMap;
@@ -17,12 +17,12 @@ pub enum ResolutionError {
 }
 
 pub struct Binding {
-    id: String,
+    id: Identifier,
     mutable: bool,
 }
 
 impl Binding {
-    pub fn new(id: String, mutable: bool) -> Self {
+    pub fn new(id: Identifier, mutable: bool) -> Self {
         Self { id, mutable }
     }
 }
@@ -96,7 +96,7 @@ impl Resolver {
             Expr::BinaryExpr { op: BinaryOp::Assign, left, right } => {
                 let left_resolved = match left.expr {
                     Expr::Identifier(ident) if !self.find_binding(&ident)?.mutable => {
-                        return Err(ResolutionError::ImmutableAssignment(ident.clone()))
+                        return Err(ResolutionError::ImmutableAssignment(ident.to_string()))
                     }
                     Expr::Identifier(_) => {
                         self.resolve_expr(*left)?
@@ -134,9 +134,9 @@ impl Resolver {
         Ok(ExprNode::new(resolved))
     }
 
-    fn new_binding(&mut self, identifier: &str, mutable: bool) -> Result<String, ResolutionError> {
+    fn new_binding(&mut self, identifier: &str, mutable: bool) -> Result<Identifier, ResolutionError> {
         self.counter += 1;
-        let id = format!("{}.{}", identifier, self.counter);
+        let id = Identifier::new(format!("{}.{}", identifier, self.counter));
 
         match self.scopes.last_mut() {
             Some(scope) if scope.contains_key(identifier) => {
