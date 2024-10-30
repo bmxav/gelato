@@ -1,33 +1,12 @@
-use ast::{AstNode, BinaryOp, Expr, ExprNode, Identifier, StmtNode, TAstNode, TExpr, TExprNode, TStmtNode};
+use ast::{
+    BinOp, Identifier, Literal, TypedBlock, TypedExpr, TypedExprKind, TypedModule, TypedStmt,
+    TypedStmtKind, Type, UntypedBlock, UntypedExpr, UntypedExprKind, UntypedModule, UntypedStmt,
+    UntypedStmtKind
+};
 
 use thiserror::Error;
 
 use std::collections::HashMap;
-
-#[derive(Clone, Debug, PartialEq)]
-pub enum Type {
-    Int,
-    String,
-    Bool,
-    Unit,
-}
-
-impl Type {
-    pub fn is_basic_type(&self) -> bool {
-        match self {
-            Self::Int | Self::String => true,
-            _ => false,
-        }
-    }
-}
-
-pub type TypedExpr = TExpr<Type>;
-
-pub type TypedExprNode = TExprNode<Type>;
-
-pub type TypedStmtNode = TStmtNode<Type>;
-
-pub type TypedAstNode = TAstNode<Type>;
 
 #[derive(Error, Debug)]
 pub enum TypeError {
@@ -50,101 +29,172 @@ impl TypeChecker {
         }
     }
 
-    pub fn type_check(&mut self, node: AstNode) -> Result<TypedAstNode, TypeError> {
-        let typed = match node {
-            AstNode::Stmt(stmt) => TypedAstNode::Stmt(self.type_check_stmt(stmt)?),
-            AstNode::Expr(expr) => TypedAstNode::Expr(self.type_check_expr(expr)?),
-        };
-        Ok(typed)
+    pub fn type_check(&mut self, module: UntypedModule) -> Result<TypedModule, TypeError> {
+        let body = self.type_check_block(module.body)?;
+        Ok(TypedModule { body })
     }
 
-    fn type_check_stmt(&mut self, stmt: StmtNode) -> Result<TypedStmtNode, TypeError> {
-        let typed = match stmt {
-            StmtNode::Let { identifier, expr } => {
-                let expr = self.type_check_expr(expr)?;
-                self.identifier_types.insert(identifier.clone(), expr.t.clone());
-                TypedStmtNode::Let { identifier: identifier.clone(), expr }
-            }
-            StmtNode::Var { identifier, expr } => {
-                let expr = self.type_check_expr(expr)?;
-                self.identifier_types.insert(identifier.clone(), expr.t.clone());
-                TypedStmtNode::Var { identifier: identifier.clone(), expr }
-            }
-        };
-        Ok(typed)
+    fn type_check_block(&mut self, block: UntypedBlock) -> Result<TypedBlock, TypeError>  {
+        let stmts = block.stmts.into_iter()
+            .map(|stmt| self.type_check_stmt(stmt))
+            .collect::<Result<Vec<TypedStmt>, TypeError>>()?;
+
+        let ty = stmts.last().map(|s| s.ty.clone()).unwrap_or(Type::Unit);
+
+        Ok(TypedBlock { stmts, ty })
     }
 
-    fn type_check_expr(&mut self, expr: ExprNode) -> Result<TypedExprNode, TypeError> {
-        let typed = match expr.expr {
-            Expr::Int(n) => TypedExprNode { expr: TypedExpr::Int(n), t: Type::Int },
-            Expr::String(s) => TypedExprNode { expr: TypedExpr::String(s), t: Type::String },
-            Expr::Bool(b) => TypedExprNode { expr: TypedExpr::Bool(b), t: Type::Bool },
-            Expr::Identifier(ident) => {
-                let t = self.identifier_types.get(&ident)
-                    .ok_or(TypeError::UnknownType(ident.clone().to_string()))?.clone();
-                TypedExprNode { expr: TypedExpr::Identifier(ident), t: t }
+    fn type_check_stmt(&mut self, stmt: UntypedStmt) -> Result<TypedStmt, TypeError> {
+        let typed_stmt = match stmt.kind {
+            UntypedStmtKind::Let(ident, expr) => {
+                let expr = self.type_check_expr(expr)?;
+                self.identifier_types.insert(ident.clone(), expr.ty.clone());
+                TypedStmt {
+                    kind: TypedStmtKind::Let(ident, expr),
+                    ty: Type::Unit,
+                }
             }
-            Expr::BinaryExpr { op, left, right } => {
-                let left = Box::new(self.type_check_expr(*left)?);
-                let right = Box::new(self.type_check_expr(*right)?);
-                if left.t != right.t {
-                    return Err(TypeError::TypeMismatch(left.t, right.t));
+            UntypedStmtKind::Var(ident, expr) => {
+                let expr = self.type_check_expr(expr)?;
+                self.identifier_types.insert(ident.clone(), expr.ty.clone());
+                TypedStmt {
+                    kind: TypedStmtKind::Var(ident, expr),
+                    ty: Type::Unit,
+                }
+            }
+            UntypedStmtKind::VarDecl(ident, ty) => {
+                self.identifier_types.insert(ident.clone(), ty.clone());
+                TypedStmt {
+                    kind: TypedStmtKind::VarDecl(ident, ty),
+                    ty: Type::Unit,
+                }
+            }
+            UntypedStmtKind::Assign(left, right) => {
+                let left = self.type_check_expr(left)?;
+                let right = self.type_check_expr(right)?;
+
+                //TODO: Check that left-hand side allows assignment.
+                if left.ty != right.ty {
+                    return Err(TypeError::TypeMismatch(left.ty, right.ty));
                 }
 
-                let t = match op {
-                    // Assignment operator will always be unit.
-                    BinaryOp::Assign | BinaryOp::AddAssign | BinaryOp::SubAssign  => Type::Unit,
-                    BinaryOp::And
-                        | BinaryOp::Eq
-                        | BinaryOp::GreaterThan
-                        | BinaryOp::GreaterThanEq
-                        | BinaryOp::LessThan
-                        | BinaryOp::LessThanEq
-                        | BinaryOp::Or
-                        | BinaryOp::NotEq => Type::Bool,
-                    _ => left.t.clone(),
-                };
-
-                TypedExprNode { expr: TypedExpr::BinaryExpr { op, left, right }, t }
+                TypedStmt {
+                    kind: TypedStmtKind::Assign(left, right),
+                    ty: Type::Unit,
+                }
             }
-            Expr::If { cond, then, els } => {
-                let cond = Box::new(self.type_check_expr(*cond)?);
-                if cond.t != Type::Bool {
-                    return Err(TypeError::UnexpectedType { expected: Type::Bool, found: cond.t });
+            UntypedStmtKind::OpAssign(op, left, right) => {
+                let left = self.type_check_expr(left)?;
+                let right = self.type_check_expr(right)?;
+
+                //TODO: Check that left-hand side allows assignment and that both sides
+                // are valid operands.
+                if left.ty != right.ty {
+                    return Err(TypeError::TypeMismatch(left.ty, right.ty));
                 }
 
-                let then = Box::new(self.type_check_expr(*then)?);
-                let els = match els.map(|e| self.type_check_expr(*e)).transpose()? {
-                    Some(els) if then.t == els.t => Some(Box::new(els)),
-                    Some(els) => {
-                        return Err(TypeError::TypeMismatch(then.t, els.t));
-                    }
+                TypedStmt {
+                    kind: TypedStmtKind::OpAssign(op, left, right),
+                    ty: Type::Unit,
+                }
+            }
+            UntypedStmtKind::Expr(expr) => {
+                let expr = self.type_check_expr(expr)?;
+                let ty = expr.ty.clone();
+                TypedStmt {
+                    kind: TypedStmtKind::Expr(expr),
+                    ty,
+                }
+            }
+        };
+
+        Ok(typed_stmt)
+    }
+
+    fn type_check_expr(&mut self, expr: UntypedExpr) -> Result<TypedExpr, TypeError> {
+        let typed_expr = match expr.kind {
+            UntypedExprKind::Literal(Literal::Identifier(ident)) => {
+                let ty = self.identifier_types.get(&ident)
+                    .ok_or(TypeError::UnknownType(ident.to_string()))?
+                    .clone();
+                TypedExpr {
+                    kind: TypedExprKind::Literal(Literal::Identifier(ident)),
+                    ty,
+                }
+            },
+            UntypedExprKind::Literal(s @ Literal::String(_)) => {
+                TypedExpr {
+                    kind: TypedExprKind::Literal(s),
+                    ty: Type::String,
+                }
+            },
+            UntypedExprKind::Literal(i @ Literal::Int(_)) => {
+                TypedExpr {
+                    kind: TypedExprKind::Literal(i),
+                    ty: Type::Int,
+                }
+            },
+            UntypedExprKind::Literal(b @ Literal::Bool(_)) => {
+                TypedExpr {
+                    kind: TypedExprKind::Literal(b),
+                    ty: Type::Bool,
+                }
+            },
+            UntypedExprKind::If(cond, then, els) => {
+                let cond = self.type_check_expr(*cond)?;
+                if cond.ty != Type::Bool {
+                    return Err(TypeError::UnexpectedType { expected: Type::Bool, found: cond.ty })
+                }
+
+                let then = self.type_check_block(then)?;
+                let els = match els.map(|e| self.type_check_block(e)).transpose()? {
+                    Some(els) if els.ty == then.ty => Some(els),
+                    Some(els) => return Err(TypeError::TypeMismatch(then.ty, els.ty)),
                     None => None,
                 };
-                let t = then.t.clone();
-                TypedExprNode { expr: TypedExpr::If { cond, then, els }, t }
-            }
-            Expr::Block(items) => {
-                let mut block = Vec::with_capacity(items.len());
-                let mut t = Type::Unit;
-                for item in items {
-                    let typed_item = match item {
-                        AstNode::Stmt(stmt) => {
-                            t = Type::Unit;
-                            TypedAstNode::Stmt(self.type_check_stmt(stmt)?)
-                        }
-                        AstNode::Expr(expr) => {
-                            let typed_expr = self.type_check_expr(expr)?;
-                            t = typed_expr.t.clone();
-                            TypedAstNode::Expr(typed_expr)
-                        }
-                    };
-                    block.push(typed_item);
+
+                let ty = then.ty.clone();
+                TypedExpr {
+                    kind: TypedExprKind::If(Box::new(cond), then, els),
+                    ty,
                 }
-                TypedExprNode { expr: TypedExpr::Block(block), t: t }
-            }
+            },
+            UntypedExprKind::Block(block) => {
+                let block = self.type_check_block(block)?;
+                let ty = block.ty.clone();
+                TypedExpr {
+                    kind: TypedExprKind::Block(block),
+                    ty,
+                }
+            },
+            UntypedExprKind::Binary(op, left, right) => {
+                let left = self.type_check_expr(*left)?;
+                let right = self.type_check_expr(*right)?;
+
+                if left.ty != right.ty {
+                    return Err(TypeError::TypeMismatch(left.ty, right.ty));
+                }
+
+                //TODO: Ensure that the binop is supported by both operands.
+                let ty = match op {
+                    BinOp::And
+                        | BinOp::Eq
+                        | BinOp::Gt
+                        | BinOp::Gte
+                        | BinOp::Lt
+                        | BinOp::Lte
+                        | BinOp::Or
+                        | BinOp::Ne => Type::Bool,
+                    _ => left.ty.clone(),
+                };
+
+                TypedExpr {
+                    kind: TypedExprKind::Binary(op, Box::new(left), Box::new(right)),
+                    ty,
+                }
+            },
         };
 
-        Ok(typed)
+        Ok(typed_expr)
     }
 }

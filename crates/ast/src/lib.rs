@@ -1,29 +1,56 @@
+use std::fmt;
 use std::ops::Deref;
 
+#[derive(Clone, Debug, PartialEq)]
+pub enum Type {
+    Int,
+    String,
+    Bool,
+    Unit,
+}
+
+impl Type {
+    pub fn is_basic_type(&self) -> bool {
+        match self {
+            Self::Int | Self::String => true,
+            _ => false,
+        }
+    }
+}
+
+impl fmt::Display for Type {
+    fn fmt(&self, f: &mut fmt::Formatter) -> fmt::Result {
+        let s = match self {
+            Type::Int => "Int",
+            Type::String => "String",
+            Type::Bool => "Bool",
+            Type::Unit => "Unit",
+        };
+        write!(f, "{s}")
+    }
+}
+
 #[derive(Debug)]
-pub enum BinaryOp {
+pub enum BinOp {
     Add,
     Sub,
     Mul,
     Div,
+    Rem,
     Eq,
-    NotEq,
-    LessThan,
-    LessThanEq,
-    GreaterThan,
-    GreaterThanEq,
+    Ne,
+    Lt,
+    Lte,
+    Gt,
+    Gte,
     And,
     Or,
-    Assign,
-    AddAssign,
-    SubAssign,
-    MemberAccess,
 }
 
 #[derive(Debug)]
-pub struct TExprNode<T> {
-    pub expr: TExpr<T>,
-    pub t: T,
+pub struct Expr<T> {
+    pub kind: ExprKind<T>,
+    pub ty: T
 }
 
 #[derive(Clone, Debug, Eq, PartialEq, Hash)]
@@ -44,50 +71,87 @@ impl Deref for Identifier {
 }
 
 #[derive(Debug)]
-pub enum TExpr<T> {
+pub enum StmtKind<T> {
+    Let(Identifier, Expr<T>),
+    Var(Identifier, Expr<T>),
+    VarDecl(Identifier, Type),
+    Assign(Expr<T>, Expr<T>),
+    OpAssign(BinOp, Expr<T>, Expr<T>),
+    Expr(Expr<T>),
+}
+
+#[derive(Debug)]
+pub struct Stmt<T> {
+    pub kind: StmtKind<T>,
+    pub ty: T,
+}
+
+#[derive(Debug)]
+pub struct Block<T> {
+    pub stmts: Vec<Stmt<T>>,
+    pub ty: T,
+}
+
+#[derive(Debug)]
+pub enum Literal {
     Identifier(Identifier),
-    String(String),
     Int(i64),
+    String(String),
     Bool(bool),
-    BinaryExpr {
-        op: BinaryOp,
-        left: Box<TExprNode<T>>,
-        right: Box<TExprNode<T>>,
-    },
-    If {
-        cond: Box<TExprNode<T>>,
-        then: Box<TExprNode<T>>,
-        els: Option<Box<TExprNode<T>>>,
-    },
-    Block(Vec<TAstNode<T>>),
 }
 
 #[derive(Debug)]
-pub enum TStmtNode<T> {
-    Let {
-        identifier: Identifier,
-        expr: TExprNode<T>,
-    },
-    Var {
-        identifier: Identifier,
-        expr: TExprNode<T>,
-   }
+pub enum ExprKind<T> {
+    Literal(Literal),
+    Binary(BinOp, Box<Expr<T>>, Box<Expr<T>>),
+    If(Box<Expr<T>>, Block<T>, Option<Block<T>>),
+    Block(Block<T>),
 }
 
 #[derive(Debug)]
-pub enum TAstNode<T> {
-    Stmt(TStmtNode<T>),
-    Expr(TExprNode<T>),
+pub struct Module<T> {
+    pub body: Block<T>,
 }
 
-pub type Expr = TExpr<()>;
-pub type ExprNode = TExprNode<()>;
+pub type UntypedBlock = Block<()>;
 
-impl ExprNode {
-    pub fn new(expr: Expr) -> ExprNode {
-        ExprNode { expr, t: () }
+impl UntypedBlock {
+    pub fn new(stmts: Vec<UntypedStmt>) -> Self {
+        Self { stmts, ty: () }
     }
 }
 
-pub type StmtNode = TStmtNode<()>;
-pub type AstNode = TAstNode<()>;
+pub type UntypedExpr = Expr<()>;
+
+impl UntypedExpr {
+    pub fn new(kind: UntypedExprKind) -> Self {
+        Self { kind, ty: () }
+    }
+}
+
+pub type UntypedExprKind = ExprKind<()>;
+
+pub type UntypedStmt = Stmt<()>;
+
+impl UntypedStmt {
+    pub fn new(kind: UntypedStmtKind) -> Self {
+        Self { kind, ty: () }
+    }
+}
+
+pub type UntypedStmtKind = StmtKind<()>;
+
+pub type UntypedModule = Module<()>;
+
+impl UntypedModule {
+    pub fn new(body: UntypedBlock) -> Self {
+        Self { body }
+    }
+}
+
+pub type TypedBlock = Block<Type>;
+pub type TypedExpr = Expr<Type>;
+pub type TypedExprKind = ExprKind<Type>;
+pub type TypedStmt = Stmt<Type>;
+pub type TypedStmtKind = StmtKind<Type>;
+pub type TypedModule = Module<Type>;

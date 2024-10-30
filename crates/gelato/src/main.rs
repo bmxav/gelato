@@ -1,6 +1,6 @@
 use codegen::{toolchain, CodeGen};
 use parser::{Lexer, Parser, SourceFile, TokenKind};
-use syntax::{Resolver, TypeChecker};
+use syntax::{Expander, Resolver, TypeChecker};
 
 use anyhow::Result;
 use clap::{Args, Parser as ClapParser, Subcommand};
@@ -61,35 +61,43 @@ fn main() -> Result<()> {
         Command::Parse(args) => {
             let source_file = SourceFile::load(&args.source)?;
             let mut parser = Parser::new(&source_file);
-            let mut block = parser.parse()?;
+            let mut module = parser.parse()?;
 
             if args.resolve {
                 let mut resolver = Resolver::new();
-                block = resolver.resolve(block)?;
+                module = resolver.resolve(module)?;
             }
 
             if args.type_check {
                 let mut type_checker = TypeChecker::new();
-                let typed_block = type_checker.type_check(block)?;
-                println!("{:#?}", typed_block);
+                let mut module = type_checker.type_check(module)?;
+
+                let expander = Expander::new();
+                module = expander.expand(module)?;
+
+                println!("{:#?}", module);
+
             } else {
-                println!("{:#?}", block);
+                println!("{:#?}", module);
             }
         }
         Command::Gen(args) => {
             let source_file = SourceFile::load(&args.source)?;
             let mut parser = Parser::new(&source_file);
-            let mut block = parser.parse()?;
+            let mut module = parser.parse()?;
 
             let mut resolver = Resolver::new();
-            block = resolver.resolve(block)?;
+            module = resolver.resolve(module)?;
 
             let mut type_checker = TypeChecker::new();
-            let typed_block = type_checker.type_check(block)?;
+            let mut module = type_checker.type_check(module)?;
+
+            let expander = Expander::new();
+            module = expander.expand(module)?;
 
             let mut cursor = Cursor::new(Vec::new());
             let mut codegen = CodeGen::new(&mut cursor);
-            codegen.gen(&typed_block)?;
+            codegen.gen(&module)?;
             cursor.seek(SeekFrom::Start(0))?;
             let formatted = toolchain::go_fmt(&mut cursor)?;
 
