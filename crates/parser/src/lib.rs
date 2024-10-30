@@ -6,7 +6,10 @@ pub use crate::errors::{ParseError, ParseErrorKind};
 pub use crate::lexer::Lexer;
 pub use crate::token::{Token, TokenKind};
 
-use ast::{AstNode, BinaryOp, Expr, ExprNode, Identifier, StmtNode};
+use ast::{
+    BinOp, Identifier, Literal, UntypedBlock, UntypedExpr, UntypedExprKind,
+    UntypedModule, UntypedStmt, UntypedStmtKind,
+};
 
 use std::path::{Path, PathBuf};
 
@@ -61,7 +64,7 @@ impl<'a> Parser<'a> {
         }
     }
 
-    pub fn parse(&mut self) -> Result<AstNode, ParseError> {
+    pub fn parse(&mut self) -> Result<UntypedModule, ParseError> {
         //TODO(bmxav): Add the concept of files and modules. For now we will just use a
         // `Block` as the root node. When this changes we will no longer allow expressions
         // to appear in the top-level block, only statements.
@@ -69,62 +72,103 @@ impl<'a> Parser<'a> {
         // When modules are in place, it may be worth looking into implementing
         // implicit entry points for a single module. This would allow for expressions in
         // the top-level block and have a "main()" function generated for it.
-        self.parse_block().map(|block| AstNode::Expr(block))
+        let module = UntypedModule::new(self.parse_block()?);
+        Ok(module)
     }
 
-    fn parse_block(&mut self) -> Result<ExprNode, ParseError> {
-        let mut block = Vec::new();
+    fn parse_block(&mut self) -> Result<UntypedBlock, ParseError> {
+        let mut stmts = Vec::new();
 
         loop {
-            //TODO(bmxav): Don't return errors immediately. They should be recorded and parsing
-            // should continue from the next synchronization point. Any errors can then be
-            // reported at the very end.
-            let node = match self.next_token.kind {
-                TokenKind::Let => AstNode::Stmt(self.parse_let_decl()?),
-                TokenKind::Var => AstNode::Stmt(self.parse_var_decl()?),
+            let stmt = match self.next_token.kind {
                 TokenKind::Else | TokenKind::End | TokenKind::Eof => break,
-                _ => AstNode::Expr(self.parse_expr(1)?),
+                _ => self.parse_stmt()?
             };
-            block.push(node);
+
+            stmts.push(stmt);
         }
 
-        Ok(ExprNode::new(Expr::Block(block)))
+        Ok(UntypedBlock::new(stmts))
     }
 
-    fn parse_let_decl(&mut self) -> Result<StmtNode, ParseError> {
+    fn parse_stmt(&mut self) -> Result<UntypedStmt, ParseError> {
+        let kind = match self.next_token.kind {
+            TokenKind::Let => self.parse_let()?,
+            TokenKind::Var => self.parse_var()?,
+            _ => {
+                // We must be looking for an expression.
+                let expr = self.parse_expr(1)?;
+
+                // Check if this is the left-hand side of an assignment.
+                self.parse_assignment(expr)?
+            }
+        };
+
+        Ok(UntypedStmt::new(kind))
+    }
+
+    // Checks if the given expression is actually the left-hand side of an assignment operation.
+    // If so, this will return the appropriate assignment statement node, otherwise it will return
+    // a statement representing the original expression that was passed in.
+    fn parse_assignment(&mut self, expr: UntypedExpr) -> Result<UntypedStmtKind, ParseError> {
+        let kind = match self.matches(TokenKind::Eq) {
+            Some(_) => {
+                let right = self.parse_expr(1)?;
+                UntypedStmtKind::Assign(expr, right)
+            },
+            None => match self.matches_assign_op() {
+                Some(op) => {
+                    let right = self.parse_expr(1)?;
+                    UntypedStmtKind::OpAssign(op, expr, right)
+                }
+                None => UntypedStmtKind::Expr(expr)
+            }
+        };
+        Ok(kind)
+    }
+
+    fn matches_assign_op(&mut self) -> Option<BinOp> {
+        let token = self.matches_if(|kind| match kind {
+            TokenKind::PlusEq | TokenKind::MinusEq => true,
+            _ => false,
+        })?;
+
+        let op = match token.kind {
+            TokenKind::PlusEq => BinOp::Add,
+            TokenKind::MinusEq => BinOp::Sub,
+            _ => return None,
+        };
+
+        Some(op)
+    }
+
+    fn parse_let(&mut self) -> Result<UntypedStmtKind, ParseError> {
         let _ = self.expect(TokenKind::Let)?;
         let identifier = self.parse_identifier()?;
         self.expect(TokenKind::Eq)?;
         let expr = self.parse_expr(1)?;
-
-        Ok(StmtNode::Let { identifier, expr })
+        Ok(UntypedStmtKind::Let(identifier, expr))
     }
 
-    fn parse_var_decl(&mut self) -> Result<StmtNode, ParseError> {
+    fn parse_var(&mut self) -> Result<UntypedStmtKind, ParseError> {
         let _ = self.expect(TokenKind::Var)?;
         let identifier = self.parse_identifier()?;
         self.expect(TokenKind::Eq)?;
         let expr = self.parse_expr(1)?;
-
-        Ok(StmtNode::Var{ identifier, expr })
+        Ok(UntypedStmtKind::Var(identifier, expr))
     }
 
-    fn parse_expr(&mut self, min_precedence: u8) -> Result<ExprNode, ParseError> {
+
+    fn parse_expr(&mut self, min_precedence: u8) -> Result<UntypedExpr, ParseError> {
         let mut left = self.parse_factor()?;
 
         loop {
-            let op = self.binary_op(self.next_token.kind);
+            let op = self.bin_op(self.next_token.kind);
             match op {
                 Some(op) if self.precedence(&op) >= min_precedence => {
-                    // Eat the binary operator.
                     let _ = self.consume();
-
                     let right = self.parse_expr(self.precedence(&op) + 1)?;
-                    left = ExprNode::new(Expr::BinaryExpr {
-                        op: op,
-                        left: Box::new(left),
-                        right: Box::new(right),
-                    });
+                    left = UntypedExpr::new(UntypedExprKind::Binary(op, Box::new(left), Box::new(right)));
                 }
                 _ => break
             }
@@ -133,35 +177,30 @@ impl<'a> Parser<'a> {
         Ok(left)
     }
 
-    fn parse_factor(&mut self) -> Result<ExprNode, ParseError> {
+    fn parse_factor(&mut self) -> Result<UntypedExpr, ParseError> {
         let factor = match self.next_token.kind {
-            TokenKind::Int => ExprNode::new(Expr::Int(self.parse_int_constant()?)),
-            TokenKind::String { .. } => ExprNode::new(Expr::String(self.parse_string_literal()?)),
-            TokenKind::Identifier => ExprNode::new(Expr::Identifier(self.parse_identifier()?)),
-            TokenKind::True => ExprNode::new(Expr::Bool(self.parse_true_literal()?)),
-            TokenKind::False => ExprNode::new(Expr::Bool(self.parse_false_literal()?)),
-            TokenKind::If => {
-                let _ = self.expect(TokenKind::If)?;
-
-                let cond = Box::new(self.parse_expr(1)?);
-
-                let _ = self.expect(TokenKind::Then);
-                let then = self.parse_block()?;
-
-                let els = self.matches(TokenKind::Else)
-                    .map(|_| self.parse_block())
-                    .transpose()?;
-
-                let _ = self.expect(TokenKind::End)?;
-
-                ExprNode::new(Expr::If { cond, then: Box::new(then), els: els.map(Box::new) })
+            TokenKind::Int => {
+                let literal = self.parse_int_literal()?;
+                let kind = UntypedExprKind::Literal(Literal::Int(literal));
+                UntypedExpr::new(kind)
             }
-            TokenKind::LeftParen => {
-                let _ = self.expect(TokenKind::LeftParen)?;
-                let expr = self.parse_expr(1)?;
-                let _ = self.expect(TokenKind::RightParen)?;
-                expr
+            TokenKind::String { .. } => {
+                let literal = self.parse_string_literal()?;
+                let kind = UntypedExprKind::Literal(Literal::String(literal));
+                UntypedExpr::new(kind)
             }
+            TokenKind::True | TokenKind::False => {
+                let literal = self.parse_bool_literal()?;
+                let kind = UntypedExprKind::Literal(Literal::Bool(literal));
+                UntypedExpr::new(kind)
+            },
+            TokenKind::Identifier => {
+                let ident = self.parse_identifier()?;
+                let kind = UntypedExprKind::Literal(Literal::Identifier(ident));
+                UntypedExpr::new(kind)
+            }
+            TokenKind::If => UntypedExpr::new(self.parse_if_expr()?),
+            TokenKind::LeftParen => self.parse_grouping()?,
             _ => return Err(self.unexpected_token_error(&self.next_token))
         };
 
@@ -210,21 +249,49 @@ impl<'a> Parser<'a> {
         Ok(())
     }
 
-    fn parse_int_constant(&mut self) -> Result<i64, ParseError> {
+    fn parse_int_literal(&mut self) -> Result<i64, ParseError> {
         let token = self.expect(TokenKind::Int)?;
         let value = token.text.parse::<i64>()
             .map_err(|_| self.emit_token_error(&token, ParseErrorKind::InvalidIntLiteral(token.text.to_string())))?;
         Ok(value)
     }
 
-    fn parse_true_literal(&mut self) -> Result<bool, ParseError> {
-        let _ = self.expect(TokenKind::True)?;
-        Ok(true)
+    fn parse_bool_literal(&mut self) -> Result<bool, ParseError> {
+        let token = self.expect_if(|kind| match kind {
+            TokenKind::True | TokenKind::False => true,
+            _ => false
+        })?;
+
+        let value = if token.kind == TokenKind::True {
+            true
+        } else {
+            false
+        };
+
+        Ok(value)
     }
 
-    fn parse_false_literal(&mut self) -> Result<bool, ParseError> {
-        let _ = self.expect(TokenKind::False)?;
-        Ok(false)
+    fn parse_if_expr(&mut self) -> Result<UntypedExprKind, ParseError> {
+        let _ = self.expect(TokenKind::If)?;
+        let cond = Box::new(self.parse_expr(1)?);
+
+        let _ = self.expect(TokenKind::Then)?;
+        let then = self.parse_block()?;
+
+        let els = self.matches(TokenKind::Else)
+            .map(|_| self.parse_block())
+            .transpose()?;
+
+        let _ = self.expect(TokenKind::End)?;
+
+        Ok(UntypedExprKind::If(cond, then, els))
+    }
+
+    fn parse_grouping(&mut self) -> Result<UntypedExpr, ParseError> {
+        let _ = self.expect(TokenKind::LeftParen)?;
+        let expr = self.parse_expr(1)?;
+        let _ = self.expect(TokenKind::RightParen)?;
+        Ok(expr)
     }
 
     fn consume(&mut self) -> Token<'a> {
@@ -286,42 +353,33 @@ impl<'a> Parser<'a> {
         }
     }
 
-    fn binary_op(&self, kind: TokenKind) -> Option<BinaryOp> {
+    fn bin_op(&self, kind: TokenKind) -> Option<BinOp> {
         let op = match kind {
-            TokenKind::Plus => BinaryOp::Add,
-            TokenKind::Minus => BinaryOp::Sub,
-            TokenKind::Star => BinaryOp::Mul,
-            TokenKind::Slash => BinaryOp::Div,
-            TokenKind::Eq => BinaryOp::Assign,
-            TokenKind::PlusEq => BinaryOp::AddAssign,
-            TokenKind::MinusEq => BinaryOp::SubAssign,
-            TokenKind::EqEq => BinaryOp::Eq,
-            TokenKind::BangEq => BinaryOp::NotEq,
-            TokenKind::LessThan => BinaryOp::LessThan,
-            TokenKind::LessThanEq => BinaryOp::LessThanEq,
-            TokenKind::GreaterThan => BinaryOp::GreaterThan,
-            TokenKind::GreaterThanEq => BinaryOp::GreaterThanEq,
-            TokenKind::Dot => BinaryOp::MemberAccess,
-            TokenKind::And => BinaryOp::And,
-            TokenKind::Or => BinaryOp::Or,
+            TokenKind::Plus => BinOp::Add,
+            TokenKind::Minus => BinOp::Sub,
+            TokenKind::Star => BinOp::Mul,
+            TokenKind::Slash => BinOp::Div,
+            TokenKind::EqEq => BinOp::Eq,
+            TokenKind::BangEq => BinOp::Ne,
+            TokenKind::LessThan => BinOp::Lt,
+            TokenKind::LessThanEq => BinOp::Lte,
+            TokenKind::GreaterThan => BinOp::Gt,
+            TokenKind::GreaterThanEq => BinOp::Gte,
+            TokenKind::And => BinOp::And,
+            TokenKind::Or => BinOp::Or,
             _ => return None,
         };
         Some(op)
     }
 
-    fn precedence(&self, op: &BinaryOp) -> u8 {
+    fn precedence(&self, op: &BinOp) -> u8 {
         match op {
-            BinaryOp::MemberAccess => 60,
-            BinaryOp::Mul | BinaryOp::Div => 50,
-            BinaryOp::Add | BinaryOp::Sub => 40,
-            BinaryOp::LessThan
-                | BinaryOp::LessThanEq
-                | BinaryOp::GreaterThan
-                | BinaryOp::GreaterThanEq => 35,
-            BinaryOp::Eq | BinaryOp::NotEq => 30,
-            BinaryOp::And => 10,
-            BinaryOp::Or => 5,
-            BinaryOp::Assign | BinaryOp::AddAssign | BinaryOp::SubAssign => 1,
+            BinOp::Mul | BinOp::Div | BinOp::Rem => 50,
+            BinOp::Add | BinOp::Sub => 40,
+            BinOp::Lt | BinOp::Lte | BinOp::Gt | BinOp::Gte => 35,
+            BinOp::Eq | BinOp::Ne => 30,
+            BinOp::And => 10,
+            BinOp::Or => 5,
         }
     }
 }

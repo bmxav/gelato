@@ -1,4 +1,7 @@
-use ast::{AstNode, BinaryOp, Expr, ExprNode, Identifier, StmtNode};
+use ast::{
+    UntypedBlock, UntypedExpr, UntypedExprKind, Identifier, Literal, UntypedModule,
+    UntypedStmt, UntypedStmtKind,
+};
 use thiserror::Error;
 
 use std::collections::HashMap;
@@ -16,19 +19,10 @@ pub enum ResolutionError {
     ImmutableAssignment(String),
 }
 
-pub struct Binding {
-    id: Identifier,
-    mutable: bool,
-}
-
-impl Binding {
-    pub fn new(id: Identifier, mutable: bool) -> Self {
-        Self { id, mutable }
-    }
-}
+type Scope = HashMap<Identifier, Identifier>;
 
 pub struct Resolver {
-    scopes: Vec<HashMap<String, Binding>>,
+    scopes: Vec<Scope>,
     counter: usize,
 }
 
@@ -40,123 +34,111 @@ impl Resolver {
         }
     }
 
-    pub fn resolve(&mut self, node: AstNode) -> Result<AstNode, ResolutionError> {
-
-        let resolved_node = match node {
-            AstNode::Stmt(stmt) => AstNode::Stmt(self.resolve_stmt(stmt)?),
-            AstNode::Expr(expr) => AstNode::Expr(self.resolve_expr(expr)?),
-        };
-
-        Ok(resolved_node)
+    pub fn resolve(&mut self, mut module: UntypedModule) -> Result<UntypedModule, ResolutionError> {
+        module.body = self.resolve_block(module.body)?;
+        Ok(module)
     }
 
-    fn resolve_stmt(&mut self, stmt: StmtNode) -> Result<StmtNode, ResolutionError> {
-        let resolved = match stmt {
-            StmtNode::Let { identifier, expr } => {
-                let resolved = self.resolve_expr(expr)?;
-                let id = self.new_binding(&identifier, false)?;
-                StmtNode::Let {
-                    identifier: id,
-                    expr: resolved,
-                }
+    fn resolve_stmt(&mut self, stmt: UntypedStmt) -> Result<UntypedStmt, ResolutionError> {
+        let kind = match stmt.kind {
+            UntypedStmtKind::Let(ident, expr) => {
+                let expr = self.resolve_expr(expr)?;
+                let ident = self.new_binding(&ident)?;
+                UntypedStmtKind::Let(ident, expr)
             }
-            StmtNode::Var { identifier, expr } => {
-                let resolved = self.resolve_expr(expr)?;
-                let id = self.new_binding(&identifier, true)?;
-                StmtNode::Var {
-                    identifier: id,
-                    expr: resolved,
-                }
+            UntypedStmtKind::Var(ident, expr) => {
+                let expr = self.resolve_expr(expr)?;
+                let ident = self.new_binding(&ident)?;
+                UntypedStmtKind::Var(ident, expr)
+            }
+            UntypedStmtKind::VarDecl(ident, ty) => {
+                let ident = self.new_binding(&ident)?;
+                UntypedStmtKind::VarDecl(ident, ty)
+            }
+            UntypedStmtKind::Assign(left, right) => {
+                let left = self.resolve_expr(left)?;
+                let right = self.resolve_expr(right)?;
+                UntypedStmtKind::Assign(left, right)
+            }
+            UntypedStmtKind::OpAssign(op, left, right) => {
+                let left = self.resolve_expr(left)?;
+                let right = self.resolve_expr(right)?;
+                UntypedStmtKind::OpAssign(op, left, right)
+            }
+            UntypedStmtKind::Expr(expr) => {
+                let expr = self.resolve_expr(expr)?;
+                UntypedStmtKind::Expr(expr)
             }
         };
-        Ok(resolved)
+
+        Ok(UntypedStmt::new(kind))
     }
 
-    fn resolve_block(&mut self, block: Vec<AstNode>) -> Result<Expr, ResolutionError> {
-        self.scopes.push(HashMap::new());
+    fn resolve_expr(&mut self, expr: UntypedExpr) -> Result<UntypedExpr, ResolutionError> {
+        let kind = match expr.kind {
+            UntypedExprKind::Literal(Literal::Identifier(ident)) => {
+                let ident = self.find_binding(&ident)?.clone();
+                UntypedExprKind::Literal(Literal::Identifier(ident))
+            }
+            UntypedExprKind::Binary(op, left, right) => {
+                let left = self.resolve_expr(*left)?;
+                let right = self.resolve_expr(*right)?;
+                UntypedExprKind::Binary(op, Box::new(left), Box::new(right))
+            }
+            UntypedExprKind::If(cond, then, els) => {
+                let cond = self.resolve_expr(*cond)?;
+                let then = self.resolve_block(then)?;
+                let els = els.map(|e| self.resolve_block(e)).transpose()?;
+                UntypedExprKind::If(Box::new(cond), then, els)
+            }
+            UntypedExprKind::Block(block) => {
+                let block = self.resolve_block(block)?;
+                UntypedExprKind::Block(block)
+            }
+            _ => expr.kind,
+        };
 
-        let mut items = Vec::with_capacity(block.len());
+        Ok(UntypedExpr::new(kind))
+    }
 
-        for item in block {
-            let resolved = match item {
-                AstNode::Stmt(stmt) => AstNode::Stmt(self.resolve_stmt(stmt)?),
-                AstNode::Expr(expr) => AstNode::Expr(self.resolve_expr(expr)?),
-            };
-            items.push(resolved);
-        }
+    fn resolve_block(&mut self, mut block: UntypedBlock) -> Result<UntypedBlock, ResolutionError> {
+        self.scopes.push(Scope::new());
+
+        let stmts = block.stmts
+            .into_iter()
+            .map(|stmt| self.resolve_stmt(stmt))
+            .collect::<Result<Vec<UntypedStmt>, ResolutionError>>()?;
 
         self.scopes.pop();
 
-        Ok(Expr::Block(items))
+        block.stmts = stmts;
+
+        Ok(block)
     }
 
-    fn resolve_expr(&mut self, expr: ExprNode) -> Result<ExprNode, ResolutionError> {
-        let resolved = match expr.expr {
-            Expr::Identifier(ident) => Expr::Identifier(self.find_binding(&ident)?.id.clone()),
-            Expr::BinaryExpr { op: BinaryOp::Assign, left, right } => {
-                let left_resolved = match left.expr {
-                    Expr::Identifier(ident) if !self.find_binding(&ident)?.mutable => {
-                        return Err(ResolutionError::ImmutableAssignment(ident.to_string()))
-                    }
-                    Expr::Identifier(_) => {
-                        self.resolve_expr(*left)?
-                    }
-                    _ => return Err(ResolutionError::InvalidAssignment)
-                };
-
-                let right_resolved = self.resolve_expr(*right)?;
-                Expr::BinaryExpr {
-                    op: BinaryOp::Assign,
-                    left: Box::new(left_resolved),
-                    right: Box::new(right_resolved)
-                }
-
-            }
-            Expr::BinaryExpr { op, left, right } => {
-                Expr::BinaryExpr {
-                    op: op,
-                    left: Box::new(self.resolve_expr(*left)?),
-                    right: Box::new(self.resolve_expr(*right)?),
-                }
-            }
-            Expr::If { cond, then, els } => {
-                Expr::If {
-                    cond: Box::new(self.resolve_expr(*cond)?),
-                    then: Box::new(self.resolve_expr(*then)?),
-                    els: els.map(|e| self.resolve_expr(*e)).transpose()?.map(Box::new),
-                }
-            }
-            Expr::Block(items) => {
-                self.resolve_block(items)?
-            }
-            e => e,
-        };
-        Ok(ExprNode::new(resolved))
-    }
-
-    fn new_binding(&mut self, identifier: &str, mutable: bool) -> Result<Identifier, ResolutionError> {
+    fn new_binding(&mut self, ident: &Identifier) -> Result<Identifier, ResolutionError> {
         self.counter += 1;
-        let id = Identifier::new(format!("{}.{}", identifier, self.counter));
+        let resolved_ident = Identifier::new(format!("{}.{}", ident.to_string(), self.counter));
 
         match self.scopes.last_mut() {
-            Some(scope) if scope.contains_key(identifier) => {
-                Err(ResolutionError::DuplicateDefinition(identifier.to_string()))
+            Some(scope) if scope.contains_key(ident) => {
+                Err(ResolutionError::DuplicateDefinition(ident.to_string()))
             }
             Some(scope) => {
-                scope.insert(identifier.to_string(), Binding::new(id.clone(), mutable));
-                Ok(id)
+                scope.insert(ident.clone(), resolved_ident.clone());
+                Ok(resolved_ident)
             }
             None => unreachable!("Scope should always be set"),
         }
     }
 
-    fn find_binding(&self, identifier: &str) -> Result<&Binding, ResolutionError> {
+    fn find_binding(&self, ident: &Identifier) -> Result<&Identifier, ResolutionError> {
         for scope in self.scopes.iter().rev() {
-            match scope.get(identifier) {
+            match scope.get(ident) {
                 Some(binding) => return Ok(binding),
                 None => continue,
             }
         }
-        Err(ResolutionError::UndefinedIdentifier(identifier.to_string()))
+        Err(ResolutionError::UndefinedIdentifier(ident.to_string()))
     }
 }
