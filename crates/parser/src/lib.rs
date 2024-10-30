@@ -79,6 +79,11 @@ impl<'a> Parser<'a> {
 
         loop {
             let stmt = match self.next_token.kind {
+                TokenKind::Semicolon => {
+                    // Ignore rogue semicolons.
+                    let _ = self.consume();
+                    continue
+                }
                 TokenKind::Else | TokenKind::End | TokenKind::Eof => break,
                 _ => self.parse_stmt()?
             };
@@ -101,6 +106,8 @@ impl<'a> Parser<'a> {
                 self.parse_assignment(expr)?
             }
         };
+
+        self.expect(TokenKind::Semicolon)?;
 
         Ok(UntypedStmt::new(kind))
     }

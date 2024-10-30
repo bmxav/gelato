@@ -29,6 +29,12 @@ pub struct Lexer<'a> {
     chars: Peekable<CharIndices<'a>>,
     cursor: Cursor,
     token: Cursor,
+
+    // Indicates whether or not we are currently within a "grouping" (open parentheses or
+    // square bracket). Each time we enter a new grouping this value is incremented. When
+    // we leave the group it is decremented. This is used to determine when implicit
+    // semicolons should be added at the end of newlines.
+    group_level: usize,
 }
 
 impl<'a> Lexer<'a> {
@@ -38,6 +44,7 @@ impl<'a> Lexer<'a> {
             chars: input.char_indices().peekable(),
             cursor: Cursor::start(),
             token: Cursor::start(),
+            group_level: 0,
         }
     }
 
@@ -48,10 +55,19 @@ impl<'a> Lexer<'a> {
             self.consume();
 
             let kind = match c {
-                _ if c.is_whitespace() => continue,
+                _ if c.is_whitespace() => {
+                    // Add an implicit semicolon to end the statement when we reach a newline.
+                    if c == '\n' && self.group_level == 0 {
+                        TokenKind::Semicolon
+                    } else {
+                        continue
+                    }
+                },
                 '#' => {
                     //TODO: Add comments that can be captured for doc and other purposes.
                     self.consume_while(|c| c != '\n');
+                    // Eat the newline.
+                    self.consume();
                     continue;
                 },
                 '0'..='9' => self.read_number(),
@@ -100,12 +116,24 @@ impl<'a> Lexer<'a> {
                         TokenKind::GreaterThan
                     }
                 }
-                '(' => TokenKind::LeftParen,
-                ')' => TokenKind::RightParen,
+                '(' => {
+                    self.enter_group();
+                    TokenKind::LeftParen
+                }
+                ')' => {
+                    self.leave_group();
+                    TokenKind::RightParen
+                }
                 '{' => TokenKind::LeftBrace,
                 '}' => TokenKind::RightBrace,
-                '[' => TokenKind::LeftBracket,
-                ']' => TokenKind::RightBracket,
+                '[' => {
+                    self.enter_group();
+                    TokenKind::LeftBracket
+                }
+                ']' => {
+                    self.leave_group();
+                    TokenKind::RightBracket
+                }
                 '.' => TokenKind::Dot,
                 ',' => TokenKind::Comma,
                 ':' => TokenKind::Colon,
@@ -120,6 +148,16 @@ impl<'a> Lexer<'a> {
 
         self.token = self.cursor;
         self.create_token(TokenKind::Eof)
+    }
+
+    fn enter_group(&mut self) {
+        self.group_level += 1;
+    }
+
+    fn leave_group(&mut self) {
+        if self.group_level > 0 {
+            self.group_level -= 1;
+        }
     }
 
     fn create_token(&self, kind: TokenKind) -> Token<'a> {
@@ -305,7 +343,17 @@ mod tests {
         let mut lexer = Lexer::new(input);
 
         assert_eq!(lexer.next_token(), Token::new(TokenKind::Int, "123", 2, 1));
+        assert_eq!(lexer.next_token(), Token::new(TokenKind::Semicolon, "\n", 2, 4));
         assert_eq!(lexer.next_token(), Token::new(TokenKind::Eof, "", 3, 27));
+    }
+
+    #[test]
+    fn implicit_semicolon() {
+        let input = "123\n456";
+        let mut lexer = Lexer::new(input);
+        assert_eq!(lexer.next_token(), Token::new(TokenKind::Int, "123", 1, 1));
+        assert_eq!(lexer.next_token(), Token::new(TokenKind::Semicolon, "\n", 1, 4));
+        assert_eq!(lexer.next_token(), Token::new(TokenKind::Int, "456", 2, 1));
     }
 
 
@@ -327,7 +375,6 @@ mod tests {
             ("!", TokenKind::Bang),
             (".", TokenKind::Dot),
             (":", TokenKind::Colon),
-            (";", TokenKind::Semicolon),
             (",", TokenKind::Comma),
             ("(", TokenKind::LeftParen),
             (")", TokenKind::RightParen),
