@@ -6,10 +6,7 @@ pub use crate::errors::{ParseError, ParseErrorKind};
 pub use crate::lexer::Lexer;
 pub use crate::token::{Token, TokenKind};
 
-use ast::{
-    BinOp, Identifier, Literal, UntypedBlock, UntypedExpr, UntypedExprKind,
-    UntypedModule, UntypedStmt, UntypedStmtKind,
-};
+use ast::{BinOp, Ident, Literal, Block, Expr, Module, Stmt};
 
 use std::path::{Path, PathBuf};
 
@@ -47,6 +44,7 @@ impl SourceFile where {
 }
 
 pub struct Parser<'a> {
+    source_file: &'a SourceFile,
     lexer: Lexer<'a>,
     next_token: Token<'a>,
 }
@@ -57,24 +55,22 @@ impl<'a> Parser<'a> {
         let next_token = lexer.next_token();
 
         Self {
+            source_file,
             lexer,
             next_token,
         }
     }
 
-    pub fn parse(&mut self) -> Result<UntypedModule, ParseError> {
-        //TODO(bmxav): Add the concept of files and modules. For now we will just use a
-        // `Block` as the root node. When this changes we will no longer allow expressions
-        // to appear in the top-level block, only statements.
-        //
-        // When modules are in place, it may be worth looking into implementing
-        // implicit entry points for a single module. This would allow for expressions in
-        // the top-level block and have a "main()" function generated for it.
-        let module = UntypedModule::new(self.parse_block()?);
+    pub fn parse(&mut self) -> Result<Module, ParseError> {
+        let name =  self.source_file.path().and_then(|path| path.file_name()).unwrap_or_default().to_string_lossy();
+        let module = Module::new(
+            name.to_string(),
+            self.parse_block()?,
+        );
         Ok(module)
     }
 
-    fn parse_block(&mut self) -> Result<UntypedBlock, ParseError> {
+    fn parse_block(&mut self) -> Result<Block, ParseError> {
         let mut stmts = Vec::new();
 
         loop {
@@ -91,11 +87,11 @@ impl<'a> Parser<'a> {
             stmts.push(stmt);
         }
 
-        Ok(UntypedBlock::new(stmts))
+        Ok(Block::with_body(stmts))
     }
 
-    fn parse_stmt(&mut self) -> Result<UntypedStmt, ParseError> {
-        let kind = match self.next_token.kind {
+    fn parse_stmt(&mut self) -> Result<Stmt, ParseError> {
+        let stmt = match self.next_token.kind {
             TokenKind::Let => self.parse_let()?,
             TokenKind::Var => self.parse_var()?,
             _ => {
@@ -109,24 +105,24 @@ impl<'a> Parser<'a> {
 
         self.expect(TokenKind::Semicolon)?;
 
-        Ok(UntypedStmt::new(kind))
+        Ok(stmt)
     }
 
     // Checks if the given expression is actually the left-hand side of an assignment operation.
     // If so, this will return the appropriate assignment statement node, otherwise it will return
     // a statement representing the original expression that was passed in.
-    fn parse_assignment(&mut self, expr: UntypedExpr) -> Result<UntypedStmtKind, ParseError> {
+    fn parse_assignment(&mut self, expr: Expr) -> Result<Stmt, ParseError> {
         let kind = match self.matches(TokenKind::Eq) {
             Some(_) => {
                 let right = self.parse_expr(1)?;
-                UntypedStmtKind::Assign(expr, right)
+                Stmt::Assign(expr, right)
             },
             None => match self.matches_assign_op() {
                 Some(op) => {
                     let right = self.parse_expr(1)?;
-                    UntypedStmtKind::OpAssign(op, expr, right)
+                    Stmt::OpAssign(op, expr, right)
                 }
-                None => UntypedStmtKind::Expr(expr)
+                None => Stmt::Expr(expr)
             }
         };
         Ok(kind)
@@ -147,24 +143,24 @@ impl<'a> Parser<'a> {
         Some(op)
     }
 
-    fn parse_let(&mut self) -> Result<UntypedStmtKind, ParseError> {
+    fn parse_let(&mut self) -> Result<Stmt, ParseError> {
         let _ = self.expect(TokenKind::Let)?;
-        let identifier = self.parse_identifier()?;
+        let ident = self.parse_ident()?;
         self.expect(TokenKind::Eq)?;
         let expr = self.parse_expr(1)?;
-        Ok(UntypedStmtKind::Let(identifier, expr))
+        Ok(Stmt::Let((), ident, expr))
     }
 
-    fn parse_var(&mut self) -> Result<UntypedStmtKind, ParseError> {
+    fn parse_var(&mut self) -> Result<Stmt, ParseError> {
         let _ = self.expect(TokenKind::Var)?;
-        let identifier = self.parse_identifier()?;
+        let ident = self.parse_ident()?;
         self.expect(TokenKind::Eq)?;
         let expr = self.parse_expr(1)?;
-        Ok(UntypedStmtKind::Var(identifier, expr))
+        Ok(Stmt::Var((), ident, expr))
     }
 
 
-    fn parse_expr(&mut self, min_precedence: u8) -> Result<UntypedExpr, ParseError> {
+    fn parse_expr(&mut self, min_precedence: u8) -> Result<Expr, ParseError> {
         let mut left = self.parse_factor()?;
 
         loop {
@@ -173,7 +169,7 @@ impl<'a> Parser<'a> {
                 Some(op) if self.precedence(&op) >= min_precedence => {
                     let _ = self.consume();
                     let right = self.parse_expr(self.precedence(&op) + 1)?;
-                    left = UntypedExpr::new(UntypedExprKind::Binary(op, Box::new(left), Box::new(right)));
+                    left = Expr::Binary((), op, Box::new(left), Box::new(right));
                 }
                 _ => break
             }
@@ -182,29 +178,25 @@ impl<'a> Parser<'a> {
         Ok(left)
     }
 
-    fn parse_factor(&mut self) -> Result<UntypedExpr, ParseError> {
+    fn parse_factor(&mut self) -> Result<Expr, ParseError> {
         let factor = match self.next_token.kind {
             TokenKind::Int => {
                 let literal = self.parse_int_literal()?;
-                let kind = UntypedExprKind::Literal(Literal::Int(literal));
-                UntypedExpr::new(kind)
+                Expr::Literal((), Literal::Int(literal))
             }
             TokenKind::String { .. } => {
                 let literal = self.parse_string_literal()?;
-                let kind = UntypedExprKind::Literal(Literal::String(literal));
-                UntypedExpr::new(kind)
+                Expr::Literal((), Literal::String(literal))
             }
             TokenKind::True | TokenKind::False => {
                 let literal = self.parse_bool_literal()?;
-                let kind = UntypedExprKind::Literal(Literal::Bool(literal));
-                UntypedExpr::new(kind)
+                Expr::Literal((), Literal::Bool(literal))
             },
             TokenKind::Identifier => {
-                let ident = self.parse_identifier()?;
-                let kind = UntypedExprKind::Literal(Literal::Identifier(ident));
-                UntypedExpr::new(kind)
+                let ident = self.parse_ident()?;
+                Expr::Variable((), ident)
             }
-            TokenKind::If => UntypedExpr::new(self.parse_if_expr()?),
+            TokenKind::If => self.parse_if_expr()?,
             TokenKind::LeftParen => self.parse_grouping()?,
             _ => return Err(self.unexpected_token_error(&self.next_token))
         };
@@ -212,8 +204,8 @@ impl<'a> Parser<'a> {
         Ok(factor)
     }
 
-    fn parse_identifier(&mut self) -> Result<Identifier, ParseError> {
-        self.expect(TokenKind::Identifier).map(|token| Identifier::new(token.text.to_string()))
+    fn parse_ident(&mut self) -> Result<Ident, ParseError> {
+        self.expect(TokenKind::Identifier).map(|token| Ident::new(token.text.to_string()))
     }
 
     fn parse_string_literal(&mut self) -> Result<String, ParseError> {
@@ -276,7 +268,7 @@ impl<'a> Parser<'a> {
         Ok(value)
     }
 
-    fn parse_if_expr(&mut self) -> Result<UntypedExprKind, ParseError> {
+    fn parse_if_expr(&mut self) -> Result<Expr, ParseError> {
         let _ = self.expect(TokenKind::If)?;
         let cond = Box::new(self.parse_expr(1)?);
 
@@ -289,10 +281,10 @@ impl<'a> Parser<'a> {
 
         let _ = self.expect(TokenKind::End)?;
 
-        Ok(UntypedExprKind::If(cond, then, els))
+        Ok(Expr::If((), cond, then, els))
     }
 
-    fn parse_grouping(&mut self) -> Result<UntypedExpr, ParseError> {
+    fn parse_grouping(&mut self) -> Result<Expr, ParseError> {
         let _ = self.expect(TokenKind::LeftParen)?;
         let expr = self.parse_expr(1)?;
         let _ = self.expect(TokenKind::RightParen)?;
