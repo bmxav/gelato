@@ -1,6 +1,6 @@
 use codegen::{toolchain, CodeGen};
 use parser::{Lexer, Parser, SourceFile, TokenKind};
-use syntax::{Expander, Resolver, TypeChecker};
+use syntax::{Resolver, Translator, TypeChecker};
 
 use anyhow::Result;
 use clap::{Args, Parser as ClapParser, Subcommand};
@@ -17,18 +17,18 @@ struct Gelato {
 
 #[derive(Subcommand, Debug)]
 enum Command {
-    Lex(LexArgs),
-    Parse(ParseArgs),
-    Gen(GenArgs),
+    Lex(Lex),
+    Parse(Parse),
+    Gen(Gen),
 }
 
 #[derive(Args, Debug)]
-struct LexArgs {
+struct Lex {
     source: PathBuf,
 }
 
 #[derive(Args, Debug)]
-struct ParseArgs {
+struct Parse {
     source: PathBuf,
     #[clap(long, action)]
     resolve: bool,
@@ -37,8 +37,10 @@ struct ParseArgs {
 }
 
 #[derive(Args, Debug)]
-struct GenArgs {
+struct Gen {
     source: PathBuf,
+    #[clap(long, action)]
+    ast: bool,
     #[clap(short, long)]
     output: Option<PathBuf>,
 }
@@ -61,56 +63,56 @@ fn main() -> Result<()> {
         Command::Parse(args) => {
             let source_file = SourceFile::load(&args.source)?;
             let mut parser = Parser::new(&source_file);
-            let mut module = parser.parse()?;
+            let module = parser.parse()?;
 
-            if args.resolve {
+            if args.resolve || args.type_check {
                 let mut resolver = Resolver::new();
-                module = resolver.resolve(module)?;
-            }
+                let resolved_module = resolver.resolve(module)?;
 
-            if args.type_check {
-                let mut type_checker = TypeChecker::new();
-                let mut module = type_checker.type_check(module)?;
-
-                let expander = Expander::new();
-                module = expander.expand(module)?;
-
-                println!("{:#?}", module);
-
-            } else {
-                println!("{:#?}", module);
+                if args.type_check {
+                    let mut type_checker = TypeChecker::new();
+                    let typed_module = type_checker.type_check(resolved_module)?;
+                    println!("{:#?}", typed_module)
+                } else {
+                    println!("{:#?}", resolved_module)
+                }
             }
         }
         Command::Gen(args) => {
             let source_file = SourceFile::load(&args.source)?;
             let mut parser = Parser::new(&source_file);
-            let mut module = parser.parse()?;
+            let module = parser.parse()?;
 
             let mut resolver = Resolver::new();
-            module = resolver.resolve(module)?;
+            let resolved_module = resolver.resolve(module)?;
 
             let mut type_checker = TypeChecker::new();
-            let mut module = type_checker.type_check(module)?;
+            let typed_module = type_checker.type_check(resolved_module)?;
 
-            let expander = Expander::new();
-            module = expander.expand(module)?;
+            let translator = Translator::new();
+            let package = translator.translate(typed_module)?;
 
-            let mut cursor = Cursor::new(Vec::new());
-            let mut codegen = CodeGen::new(&mut cursor);
-            codegen.gen(&module)?;
-            cursor.seek(SeekFrom::Start(0))?;
-            let formatted = toolchain::go_fmt(&mut cursor)?;
+            if args.ast {
+                println!("{:#?}", package);
+            } else {
+                let mut cursor = Cursor::new(Vec::new());
 
-            match &args.output {
-                Some(output) => {
-                    let mut file = File::create(output)?;
-                    file.write_all(formatted.as_bytes())?;
+                let mut codegen = CodeGen::new(&mut cursor);
+                codegen.gen(&package)?;
+
+                cursor.seek(SeekFrom::Start(0))?;
+                let formatted = toolchain::go_fmt(&mut cursor)?;
+
+                match &args.output {
+                    Some(output) => {
+                        let mut file = File::create(&output)?;
+                        file.write_all(formatted.as_bytes())?;
+                    }
+                    None => {
+                        println!("{}", formatted);
+                    }
                 }
-                None => {
-                    println!("{}", formatted);
-                }
-            };
-
+            }
         }
     }
 
